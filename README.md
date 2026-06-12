@@ -6,14 +6,10 @@ Timer de sesiones para Focusmate con cuenta regresiva, log de sesiones y notific
 
 👉 **[Descargar última versión](../../releases/latest)**
 
-1. Bajá `FocusmateTimer.exe`
-2. Poné el `.exe` en una carpeta (por ejemplo `C:\Focusmate\`)
-3. (Opcional) Creá una subcarpeta `sonidos\` con tus archivos `.wav`:
-   - `start.wav` — al iniciar sesión
-   - `end.wav` — al terminar
-   - `warn.wav` — al entrar en el último minuto
-   - `task_done.wav` — al completar una tarea
-4. Ejecutá `FocusmateTimer.exe`
+1. Bajá `JustTimer.zip`
+2. Extrae los archivos
+3. Abri el Exe (Te va a saltar un aviso de windows defender seguramente, estoy solucionando eso perdon(confia))
+4. Proba las funciones! Esta preparado para laburar con sesiones de focusmate, que aparecen en intervalos de 15 (pero podes personalizar el tiempo que quieras)
 
 La app te avisa automáticamente cuando hay una nueva versión disponible.
 
