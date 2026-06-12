@@ -139,7 +139,7 @@ def next_quarters(n=6):
     return [prev, current] + futures
 
 
-class FocusTimer:
+class JustTimer:
     def __init__(self, root, taskbar_root=None):
         self.root = root
         self.taskbar_root = taskbar_root or root
@@ -1687,7 +1687,7 @@ if __name__ == "__main__":
     try:
         # Ventana madre: aparece en taskbar pero es invisible
         root = tk.Tk()
-        root.title("Focus Timer")
+        root.title("Just Timer")
         root.geometry("1x1+0+0")
         root.configure(bg=BG)
         root.resizable(False, False)
@@ -1703,7 +1703,7 @@ if __name__ == "__main__":
 
         # Ventana hija flotante: la UI real
         win = tk.Toplevel(root)
-        app = FocusTimer(win, taskbar_root=root)
+        app = JustTimer(win, taskbar_root=root)
 
         def on_close():
             if tmp:
