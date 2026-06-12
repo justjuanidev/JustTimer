@@ -1,6 +1,6 @@
 import tkinter as tk
 from datetime import datetime, timedelta
-import base64, tempfile, os, sys, traceback, threading, subprocess
+import os, sys, traceback, threading, subprocess
 try:
     import winsound
     _HAS_WINSOUND = True
@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
@@ -308,6 +308,7 @@ class JustTimer:
                 "text":           text,
                 "done":           tk.BooleanVar(value=False),
                 "completion_min": None,
+                "notes":          "",        
             })
             self._setup_task_var.set("")
             _setup_refresh()
@@ -767,7 +768,13 @@ class JustTimer:
                 lbl.pack(side="left", fill="x", expand=True, padx=(0, 4))
                 return lbl
             _make_lbl()
-
+            # Botón notas
+            note_btn = tk.Label(row, text="✎", bg=BG, fg="#555",
+                    font=("Courier New", 9), cursor="hand2")
+            note_btn.pack(side="right", padx=(0, 2))
+            note_btn.bind("<Enter>", lambda e, b=note_btn: b.config(fg=ACCENT))
+            note_btn.bind("<Leave>", lambda e, b=note_btn: b.config(fg="#555"))
+            note_btn.bind("<Button-1>", lambda e, i=idx: _open_notes(i))
             # Botón eliminar
             del_btn = tk.Label(row, text="✕", bg=BG, fg="#333",
                                font=("Courier New", 8), cursor="hand2")
@@ -805,6 +812,46 @@ class JustTimer:
                 _refresh_task_list()
             _update_tasks_btn()
 
+
+        def _open_notes(idx):
+            task = self._session_tasks[idx]
+            dlg = tk.Toplevel(win)
+            dlg.title("")
+            dlg.configure(bg=BG)
+            dlg.resizable(False, False)
+            dlg.attributes("-topmost", True)
+            sw2, sh2 = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+            dlg.geometry(f"260x180+{(sw2-260)//2}+{(sh2-180)//2}")
+
+            tk.Label(dlg, text=task["text"], bg=BG, fg=ACCENT,
+                    font=("Courier New", 9, "bold"), wraplength=240).pack(pady=(10, 4))
+            tk.Label(dlg, text="notas", bg=BG, fg=FG_DIM,
+                    font=FONT_SMALL).pack()
+
+            txt = tk.Text(dlg, bg=BTN_BG, fg=FG_TIME, insertbackground=FG_TIME,
+                        relief="flat", bd=0, font=("Courier New", 9),
+                        width=30, height=5, wrap="word")
+            txt.pack(padx=10, pady=4, fill="both", expand=True)
+            txt.insert("1.0", task.get("notes", ""))
+            txt.focus_set()
+
+            def _save_notes():
+                task["notes"] = txt.get("1.0", "end-1c").strip()
+                # Actualizar color del botón si tiene notas
+                note_btn.config(fg=ACCENT if task["notes"] else "#555")
+                dlg.destroy()
+
+            tk.Button(dlg, text="guardar", bg=ACCENT, fg="#000",
+                    activebackground="#91a7ed", activeforeground="#000",
+                    relief="flat", bd=0, font=("Courier New", 9, "bold"),
+                    padx=10, pady=4, cursor="hand2",
+                    command=_save_notes).pack(pady=(0, 8))
+            dlg.bind("<Return>", lambda e: _save_notes())
+
+
+
+
+
         def _update_tasks_btn():
             """Actualiza el color del botón según si hay tareas."""
             total = len(self._session_tasks)
@@ -836,6 +883,7 @@ class JustTimer:
                 "text":           text,
                 "done":           tk.BooleanVar(value=False),
                 "completion_min": None,
+                "notes":          "",
             })
             task_var.set("")
             _refresh_task_list()
@@ -1514,7 +1562,7 @@ class JustTimer:
         txt.tag_config("header",    foreground=ACCENT, font=("Courier New", 10, "bold"))
         txt.tag_config("sep",       foreground="#333")
         txt.tag_config("section",   foreground="#ffcc00", font=("Courier New", 9, "bold"))
-        txt.tag_config("done",      foreground="#88ff88",
+        txt.tag_config("done",      foreground="#91a7ed",
                                     font=("Courier New", 10, "overstrike"))
         txt.tag_config("pending",   foreground="#ff8888")
         txt.tag_config("notes",     foreground=FG_TIME)
