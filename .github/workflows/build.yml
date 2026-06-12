@@ -3,7 +3,7 @@ name: Build y Release
 on:
   push:
     tags:
-      - "v*"          # Se activa al hacer: git tag v1.2.0 && git push --tags
+      - "v*"
 
 jobs:
   build:
@@ -22,11 +22,9 @@ jobs:
         run: pip install pyinstaller
 
       - name: Compilar .exe con PyInstaller
-        run: |
-          pyinstaller --onefile --windowed --icon=icono.ico --name=JustTimer JustTimer.py
-        # Si no tenés icono.ico, sacá --icon=icono.ico
+        run: pyinstaller --onefile --windowed --name=JustTimer JustTimer.py
 
-      -  name: Empaquetar en zip
+      - name: Empaquetar en zip
         run: |
           mkdir release
           copy dist\JustTimer.exe release\
@@ -37,3 +35,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: JustTimerPlus.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
