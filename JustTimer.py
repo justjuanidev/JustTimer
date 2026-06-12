@@ -105,14 +105,11 @@ def _sessions_base():
     base = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
     return os.path.join(base, "sesiones")
 
-# ── Ícono embedido (ICO multi-size) ────────────────────────────
-ICON_B64 = "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"
-
 # ── Paleta ─────────────────────────────────────────────────────
 BG         = "#0f0f0f"
 FG_TIME    = "#f0f0f0"
 FG_DIM     = "#555555"
-ACCENT     = "#c8ff00"
+ACCENT     = "#2e53cc"
 FG_WARN    = "#ff3333"   # rojo para el ultimo minuto
 WARN_SECS  = 60          # segundos antes de inicio/fin para avisar
 BTN_BG     = "#1e1e1e"
@@ -274,7 +271,7 @@ class JustTimer:
         te.bind("<Return>", self._set_manual_time)
         go = tk.Button(time_row, text="programar",
                        bg=ACCENT, fg="#000",
-                       activebackground="#d4ff33", activeforeground="#000",
+                       activebackground="#91a7ed", activeforeground="#000",
                        relief="flat", bd=0, font=("Courier New", 9, "bold"),
                        padx=10, pady=4, cursor="hand2", command=self._set_manual_time)
         go.pack(side="left", padx=4)
@@ -409,7 +406,7 @@ class JustTimer:
         t_row.pack(pady=(0,10))
         self.start_btn = tk.Button(t_row, text="||",
                                    bg=ACCENT, fg="#000",
-                                   activebackground="#d4ff33", activeforeground="#000",
+                                   activebackground="#91a7ed", activeforeground="#000",
                                    relief="flat", bd=0, font=("Courier New", 9, "bold"),
                                    padx=10, pady=4, cursor="hand2", command=self._toggle)
         self.start_btn.pack(side="left", padx=4)
@@ -851,7 +848,7 @@ class JustTimer:
 
         add_btn = tk.Button(input_row, text="+ agregar",
                             bg=ACCENT, fg="#000",
-                            activebackground="#d4ff33", activeforeground="#000",
+                            activebackground="#91a7ed", activeforeground="#000",
                             relief="flat", bd=0, font=("Courier New", 9, "bold"),
                             padx=8, pady=3, cursor="hand2", command=_add_task)
         add_btn.pack(side="left")
@@ -1034,7 +1031,7 @@ class JustTimer:
 
         save_btn = tk.Button(btn_row, text="guardar",
                              bg=ACCENT, fg="#000",
-                             activebackground="#d4ff33", activeforeground="#000",
+                             activebackground="#91a7ed", activeforeground="#000",
                              relief="flat", bd=0, font=("Courier New", 9, "bold"),
                              padx=12, pady=5, cursor="hand2", command=save_and_close)
         save_btn.pack(side="left", padx=6)
@@ -1169,7 +1166,7 @@ class JustTimer:
 
         save_btn = tk.Button(btn_row, text="guardar",
                              bg=ACCENT, fg="#000",
-                             activebackground="#d4ff33", activeforeground="#000",
+                             activebackground="#91a7ed", activeforeground="#000",
                              relief="flat", bd=0, font=("Courier New", 9, "bold"),
                              padx=12, pady=5, cursor="hand2", command=save)
         save_btn.pack(side="left", padx=6)
@@ -1261,7 +1258,7 @@ class JustTimer:
         today_btn.pack(side="right")
 
         add_btn = tk.Button(top_bar, text="+ agregar sesión", bg=ACCENT, fg="#000",
-                            activebackground="#d4ff33", activeforeground="#000",
+                            activebackground="#91a7ed", activeforeground="#000",
                             relief="flat", bd=0, font=("Courier New", 9, "bold"),
                             padx=10, pady=3, cursor="hand2")
         add_btn.pack(side="right", padx=(0,8))
@@ -1478,7 +1475,7 @@ class JustTimer:
         next_btn.config(command=go_next)
         today_btn.config(command=go_today)
         add_btn.config(command=open_add)
-        add_btn.bind("<Enter>", lambda e: add_btn.config(bg="#d4ff33"))
+        add_btn.bind("<Enter>", lambda e: add_btn.config(bg="#91a7ed"))
         add_btn.bind("<Leave>", lambda e: add_btn.config(bg=ACCENT))
 
         for btn in [prev_btn, next_btn, today_btn]:
@@ -1638,7 +1635,7 @@ class JustTimer:
 
                 tk.Button(msg, text="cerrar y actualizar",
                           bg=ACCENT, fg="#000",
-                          activebackground="#d4ff33", activeforeground="#000",
+                          activebackground="#91a7ed", activeforeground="#000",
                           relief="flat", bd=0, font=("Courier New", 9, "bold"),
                           padx=10, pady=5, cursor="hand2",
                           command=_apply_and_quit).pack(pady=(8, 0))
@@ -1693,14 +1690,12 @@ if __name__ == "__main__":
         root.configure(bg=BG)
         root.resizable(False, False)
         # Cargar icono en la ventana madre (es la que aparece en taskbar)
-        try:
-            ico_data = base64.b64decode(ICON_B64)
-            tmp = tempfile.NamedTemporaryFile(suffix=".ico", delete=False)
-            tmp.write(ico_data)
-            tmp.close()
-            root.iconbitmap(tmp.name)
-        except Exception:
-            tmp = None
+    try:
+        ico_path = os.path.join(os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)), "logo.ico")
+        root.iconbitmap(ico_path)
+        tmp = None
+    except Exception:
+        tmp = None
 
         # Ventana hija flotante: la UI real
         win = tk.Toplevel(root)
