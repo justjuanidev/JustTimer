@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
@@ -159,6 +159,7 @@ class JustTimer:
         self._end_at        = None   # cuando termina el timer (datetime)
         self._waiting       = False
         self._session_tasks = []     # lista de {"text": str, "done": BooleanVar}
+        self._session_label = ""
         self._tasks_window  = None   # referencia a la ventana flotante de tareas
 
         self._build_ui()
@@ -250,6 +251,40 @@ class JustTimer:
         ok_d.bind("<Leave>", lambda e: ok_d.config(bg=BTN_BG, fg=FG_DIM))
 
         tk.Frame(self.setup_frame, bg="#222", height=1).pack(fill="x", padx=12, pady=8)
+
+        # ── Etiqueta de sesión ───────────────────────────────────
+        tk.Label(self.setup_frame, text="tipo de sesión (opcional)",
+                bg=BG, fg=FG_DIM, font=FONT_SMALL).pack(pady=(0, 2))
+
+        label_row = tk.Frame(self.setup_frame, bg=BG)
+        label_row.pack(pady=(0, 4))
+
+        self._label_var = tk.StringVar()
+
+        # Sugerencias rápidas
+        QUICK_LABELS = ["trabajo", "edición", "limpieza", "planificación", "Programación"]
+        for ql in QUICK_LABELS:
+            ql_btn = tk.Button(
+                label_row, text=ql,
+                bg=BTN_BG, fg=FG_DIM,
+                activebackground=BTN_HOVER, activeforeground=FG_TIME,
+                relief="flat", bd=0, font=FONT_SMALL,
+                padx=7, pady=3, cursor="hand2",
+                command=lambda v=ql: self._label_var.set(v)
+            )
+            ql_btn.pack(side="left", padx=2)
+            ql_btn.bind("<Enter>", lambda e, b=ql_btn: b.config(bg=BTN_HOVER, fg=FG_TIME))
+            ql_btn.bind("<Leave>", lambda e, b=ql_btn: b.config(bg=BTN_BG, fg=FG_DIM))
+
+        label_custom_row = tk.Frame(self.setup_frame, bg=BG)
+        label_custom_row.pack(pady=(2, 0))
+        tk.Label(label_custom_row, text="otro:", bg=BG, fg=FG_DIM,
+                font=FONT_SMALL).pack(side="left", padx=(6, 2))
+        label_entry = tk.Entry(label_custom_row, textvariable=self._label_var,
+                            width=14, bg=BTN_BG, fg=FG_TIME,
+                            insertbackground=FG_TIME, relief="flat", bd=0,
+                            font=FONT_SMALL, justify="left")
+        label_entry.pack(side="left", ipady=3, padx=(0, 6))
 
         tk.Label(self.setup_frame, text="hora de inicio", bg=BG, fg=FG_DIM,
                  font=FONT_SMALL).pack(pady=(0,4))
@@ -582,6 +617,7 @@ class JustTimer:
             elapsed = int((now - start_dt).total_seconds())
             self._remaining = self._duration_secs - elapsed
             self.setup_err.config(text="")
+            self._session_label = getattr(self, "_label_var", tk.StringVar()).get().strip()
             self._show_timer()
             self._update_display()
             self._start()
@@ -592,6 +628,7 @@ class JustTimer:
         self._end_at    = end_dt
         self._total     = self._duration_secs
         self._remaining = self._duration_secs
+        self._session_label = getattr(self, "_label_var", tk.StringVar()).get().strip()
         self.setup_err.config(text="")
         self.wait_info.config(
             text=f"{self._duration_secs // 60} min  ·  {fmt_hour(start_dt)}")
@@ -971,6 +1008,17 @@ class JustTimer:
         tk.Label(dlg, text="sesión terminada  ·  anotá qué hiciste",
                  bg=BG, fg=FG_DIM, font=FONT_SMALL).pack(pady=(12, 4))
 
+        # ── Etiqueta editable post-sesión ────────────────────────
+        label_edit_row = tk.Frame(dlg, bg=BG)
+        label_edit_row.pack(fill="x", padx=12, pady=(0, 6))
+        tk.Label(label_edit_row, text="tipo:", bg=BG, fg=FG_DIM,
+                 font=FONT_SMALL).pack(side="left", padx=(0, 4))
+        _post_label_var = tk.StringVar(value=getattr(self, "_session_label", ""))
+        tk.Entry(label_edit_row, textvariable=_post_label_var, width=16,
+                 bg=BTN_BG, fg=FG_TIME, insertbackground=FG_TIME,
+                 relief="flat", bd=0, font=FONT_SMALL,
+                 justify="left").pack(side="left", ipady=3)
+        
         txt = tk.Text(dlg, bg=BTN_BG, fg=FG_TIME, insertbackground=FG_TIME,
                       relief="flat", bd=0, font=("Courier New", 10),
                       wrap="word", width=42, height=5,
@@ -1101,8 +1149,9 @@ class JustTimer:
         def save_and_close():
             content = txt.get("1.0", "end").strip()
             energy  = energy_var.get()
+            label   = _post_label_var.get().strip() or self._session_label
             if content or has_tasks:
-                self._save_session_log(now, content, energy=energy)
+                self._save_session_log(now, content, energy=energy, label=label)
             dlg.destroy()
             self._show_setup()
             self._session_tasks = []
@@ -1140,7 +1189,7 @@ class JustTimer:
 
         dlg.bind("<Control-Return>", lambda e: save_and_close())
 
-    def _save_session_log(self, session_start, content, dur_min=None, energy=None):
+    def _save_session_log(self, session_start, content, dur_min=None, energy=None, label=None):
         """Guarda el log en sesiones/YYYY-MM-DD/HH-MM.txt"""
         base   = _sessions_base()
         day    = session_start.strftime("%Y-%m-%d")
@@ -1152,8 +1201,9 @@ class JustTimer:
             dur_min = self._total // 60
         sep   = "─" * 40
         energy_str = f"  |  energía: {energy}/10" if energy is not None else ""
+        label_str  = f"  |  tipo: {label}" if label else ""
         header = (
-            f"Sesión: {session_start.strftime('%d/%m/%Y  %H:%M')}  ({dur_min} min){energy_str}\n"
+            f"Sesión: {session_start.strftime('%d/%m/%Y  %H:%M')}  ({dur_min} min){energy_str}{label_str}\n"
             f"{sep}\n\n"
         )
 
