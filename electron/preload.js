@@ -1,0 +1,1 @@
+// puente main ↔ renderer (lo usamos más adelante)
