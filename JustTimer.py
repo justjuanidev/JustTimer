@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
@@ -262,7 +262,7 @@ class JustTimer:
         self._label_var = tk.StringVar()
 
         # Sugerencias rápidas
-        QUICK_LABELS = ["trabajo", "edición", "limpieza", "planificación", "Programación"]
+        QUICK_LABELS = ["trabajo", "limpieza"]
         for ql in QUICK_LABELS:
             ql_btn = tk.Button(
                 label_row, text=ql,
