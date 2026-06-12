@@ -23,7 +23,7 @@ def _check_update_available():
         latest = data.get("tag_name", "").lstrip("v")
         assets = data.get("assets", [])
         exe_url = next((a["browser_download_url"] for a in assets
-                if a["name"].endswith(".zip")), None)
+                if a["name"].endswith(".exe")), None)
         if latest and exe_url and latest != APP_VERSION:
             return latest, exe_url
 

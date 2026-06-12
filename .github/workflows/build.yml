@@ -22,7 +22,6 @@ jobs:
           python-version: "3.11"
           architecture: "x64"
 
-
       - name: Instalar dependencias
         run: pip install pyinstaller
 
@@ -39,6 +38,8 @@ jobs:
       - name: Publicar release en GitHub
         uses: softprops/action-gh-release@v2
         with:
-          files: JustTimerPlus.zip
+          files: |
+            JustTimerPlus.zip
+            dist\JustTimer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
