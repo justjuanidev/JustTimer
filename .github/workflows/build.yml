@@ -26,13 +26,14 @@ jobs:
           pyinstaller --onefile --windowed --icon=icono.ico --name=JustTimer JustTimer.py
         # Si no tenés icono.ico, sacá --icon=icono.ico
 
+      - - name: Empaquetar en zip
+        run: |
+          mkdir release
+          copy dist\JustTimer.exe release\
+          xcopy sonidos release\sonidos\ /E /I
+          Compress-Archive -Path release\* -DestinationPath JustTimerPlus.zip
+
       - name: Publicar release en GitHub
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/FocusmateTimer.exe
-          body: |
-            ## Novedades en ${{ github.ref_name }}
-
-            <!-- Escribí acá qué cambió en esta versión -->
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: JustTimerPlus.zip
