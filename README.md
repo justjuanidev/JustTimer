@@ -1,4 +1,4 @@
-# Focusmate Timer
+# JustTimer - BETA
 
 Timer de sesiones para Focusmate con cuenta regresiva, log de sesiones y notificaciones de sonido.
 
