@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write  # Add this to allow release creation
+
 jobs:
   build:
     runs-on: windows-latest
