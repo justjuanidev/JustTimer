@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write  # Add this to allow release creation
+  contents: write
 
 jobs:
   build:
@@ -25,7 +25,7 @@ jobs:
         run: pip install pyinstaller
 
       - name: Compilar .exe con PyInstaller
-        run: pyinstaller --onefile --windowed --name=JustTimer JustTimer.py
+        run: pyinstaller --onefile --windowed --icon=logo.ico --name=JustTimer JustTimer.py
 
       - name: Empaquetar en zip
         run: |
@@ -37,6 +37,4 @@ jobs:
       - name: Publicar release en GitHub
         uses: softprops/action-gh-release@v2
         with:
-          files: JustTimerPlus.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: JustTimerPl
