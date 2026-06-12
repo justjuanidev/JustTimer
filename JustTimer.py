@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
@@ -23,9 +23,10 @@ def _check_update_available():
         latest = data.get("tag_name", "").lstrip("v")
         assets = data.get("assets", [])
         exe_url = next((a["browser_download_url"] for a in assets
-                        if a["name"].endswith(".exe")), None)
+                if a["name"].endswith(".zip")), None)
         if latest and exe_url and latest != APP_VERSION:
             return latest, exe_url
+
     except Exception:
         pass
     return None, None
