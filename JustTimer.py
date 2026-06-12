@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.6"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
