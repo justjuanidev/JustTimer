@@ -9,7 +9,7 @@ except ImportError:
 
 # ── Versión de la app ──────────────────────────────────────────
 APP_VERSION = "1.0.0"
-GITHUB_USER = "JustJuani"       # ← cambiar
+GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
 def _check_update_available():

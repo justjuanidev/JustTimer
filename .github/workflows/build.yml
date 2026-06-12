@@ -23,7 +23,7 @@ jobs:
 
       - name: Compilar .exe con PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icono.ico --name=FocusmateTimer focusmate_timer.py
+          pyinstaller --onefile --windowed --icon=icono.ico --name=JustTimer JustTimer.py
         # Si no tenés icono.ico, sacá --icon=icono.ico
 
       - name: Publicar release en GitHub
