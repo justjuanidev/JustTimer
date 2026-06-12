@@ -26,7 +26,7 @@ jobs:
           pyinstaller --onefile --windowed --icon=icono.ico --name=JustTimer JustTimer.py
         # Si no tenés icono.ico, sacá --icon=icono.ico
 
-      - - name: Empaquetar en zip
+      -  name: Empaquetar en zip
         run: |
           mkdir release
           copy dist\JustTimer.exe release\
