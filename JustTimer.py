@@ -347,6 +347,12 @@ class JustTimer:
                          wraplength=180).pack(side="left", fill="x", expand=True)
                 del_lbl = tk.Label(row, text="✕", bg=BG, fg="#333",
                                    font=("Courier New", 8), cursor="hand2")
+                note_lbl = tk.Label(row, text="✎", bg=BG, fg="#555",
+                    font=("Courier New", 8), cursor="hand2")
+                note_lbl.pack(side="right", padx=(0, 2))
+                note_lbl.bind("<Enter>", lambda e, b=note_lbl: b.config(fg=ACCENT))
+                note_lbl.bind("<Leave>", lambda e, b=note_lbl: b.config(fg="#555"))
+                note_lbl.bind("<Button-1>", lambda e, idx=i, b=note_lbl: _setup_open_notes(idx, b))
                 del_lbl.pack(side="right", padx=(0, 2))
                 del_lbl.bind("<Enter>", lambda e, b=del_lbl: b.config(fg="#ff4444"))
                 del_lbl.bind("<Leave>", lambda e, b=del_lbl: b.config(fg="#333"))
@@ -356,6 +362,34 @@ class JustTimer:
             if 0 <= idx < len(self._session_tasks):
                 self._session_tasks.pop(idx)
                 _setup_refresh()
+
+        def _setup_open_notes(idx, btn):
+            task = self._session_tasks[idx]
+            dlg = tk.Toplevel(self.setup_frame)
+            dlg.title("")
+            dlg.configure(bg=BG)
+            dlg.resizable(False, False)
+            dlg.attributes("-topmost", True)
+            sw2, sh2 = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+            dlg.geometry(f"260x180+{(sw2-260)//2}+{(sh2-180)//2}")
+            tk.Label(dlg, text=task["text"], bg=BG, fg=ACCENT,
+                    font=("Courier New", 9, "bold"), wraplength=240).pack(pady=(10, 4))
+            tk.Label(dlg, text="notas", bg=BG, fg=FG_DIM, font=FONT_SMALL).pack()
+            txt = tk.Text(dlg, bg=BTN_BG, fg=FG_TIME, insertbackground=FG_TIME,
+                        relief="flat", bd=0, font=("Courier New", 9),
+                        width=30, height=5, wrap="word")
+            txt.pack(padx=10, pady=4, fill="both", expand=True)
+            txt.insert("1.0", task.get("notes", ""))
+            txt.focus_set()
+            def _save():
+                task["notes"] = txt.get("1.0", "end-1c").strip()
+                btn.config(fg=ACCENT if task["notes"] else "#555")
+                dlg.destroy()
+            tk.Button(dlg, text="guardar", bg=ACCENT, fg="#000",
+                    activebackground="#d4ff33", activeforeground="#000",
+                    relief="flat", bd=0, font=("Courier New", 9, "bold"),
+                    padx=10, pady=4, cursor="hand2", command=_save).pack(pady=(0, 8))
+            dlg.bind("<Return>", lambda e: _save())
 
         # Guardar referencia para poder refrescar desde _show_setup
         self._setup_refresh_fn = _setup_refresh
@@ -479,6 +513,7 @@ class JustTimer:
     # VISTAS
     # ════════════════════════════════════════════════════════════
     def _show_setup(self):
+        self._session_tasks = []
         self._cancel_job()
         self._waiting = False
         self._running = False
@@ -1134,14 +1169,19 @@ class JustTimer:
                     comp_min = t.get("completion_min")
                     if comp_min is not None:
                         tasks_section += f"  [x] {t['text']}  (+{comp_min} min desde inicio)\n"
-                    else:
-                        tasks_section += f"  [x] {t['text']}\n"
+            else:
+                tasks_section += f"  [x] {t['text']}\n"
+            if t.get("notes"):
+                tasks_section += f"      → {t['notes']}\n"
+
             else:
                 tasks_section += "  (ninguna)\n"
             tasks_section += "\nTAREAS PENDIENTES:\n"
             if pending_tasks:
                 for t in pending_tasks:
                     tasks_section += f"  [ ] {t['text']}\n"
+            if t.get("notes"):
+                tasks_section += f"      → {t['notes']}\n"
             else:
                 tasks_section += "  (ninguna)\n"
             tasks_section += "\n"
