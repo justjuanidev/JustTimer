@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.4"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
@@ -1690,11 +1690,15 @@ if __name__ == "__main__":
         root.configure(bg=BG)
         root.resizable(False, False)
         # Cargar icono en la ventana madre (es la que aparece en taskbar)
-    try:
-        ico_path = os.path.join(os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)), "logo.ico")
-        root.iconbitmap(ico_path)
-        tmp = None
-    except Exception:
+        try:
+            ico_path = os.path.join(
+                os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)),
+                "logo.ico"
+            )
+            root.iconbitmap(ico_path)
+        except Exception:
+            pass
+
         tmp = None
 
         # Ventana hija flotante: la UI real
