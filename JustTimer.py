@@ -8,7 +8,7 @@ except ImportError:
     _HAS_WINSOUND = False
 
 # ── Versión de la app ──────────────────────────────────────────
-APP_VERSION = "1.1.7"
+APP_VERSION = "1.1.9"
 GITHUB_USER = "justjuanidev"       # ← cambiar
 GITHUB_REPO = "JustTimerPlus"  # ← cambiar
 
@@ -352,7 +352,7 @@ class JustTimer:
         self._setup_refresh_fn = _setup_refresh
 
         # Botón calendario en setup
-        cal_setup_btn = tk.Button(self.setup_frame, text="ver calendario",
+        cal_setup_btn = tk.Button(self.setup_frame, text="calendario",
                                   bg=BTN_BG, fg=FG_DIM,
                                   activebackground=BTN_HOVER, activeforeground=FG_TIME,
                                   relief="flat", bd=0, font=FONT_SMALL,
