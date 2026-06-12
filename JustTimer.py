@@ -274,6 +274,15 @@ class JustTimer:
                        activebackground="#91a7ed", activeforeground="#000",
                        relief="flat", bd=0, font=("Courier New", 9, "bold"),
                        padx=10, pady=4, cursor="hand2", command=self._set_manual_time)
+        now_btn = tk.Button(self.setup_frame, text="iniciar ahora",
+                    bg=BTN_BG, fg=FG_DIM,
+                    activebackground=BTN_HOVER, activeforeground=FG_TIME,
+                    relief="flat", bd=0, font=("Courier New", 9),
+                    padx=10, pady=4, cursor="hand2",
+                    command=lambda: self._schedule(datetime.now()))
+        now_btn.pack(pady=(0, 4))
+        now_btn.bind("<Enter>", lambda e: now_btn.config(bg=BTN_HOVER, fg=FG_TIME))
+        now_btn.bind("<Leave>", lambda e: now_btn.config(bg=BTN_BG, fg=FG_DIM))
         go.pack(side="left", padx=4)
 
         self.setup_err = tk.Label(self.setup_frame, text="", bg=BG, fg="#ff6666",
@@ -774,8 +783,7 @@ class JustTimer:
             note_btn.pack(side="right", padx=(0, 2))
             note_btn.bind("<Enter>", lambda e, b=note_btn: b.config(fg=ACCENT))
             note_btn.bind("<Leave>", lambda e, b=note_btn: b.config(fg="#555"))
-            note_btn.bind("<Button-1>", lambda e, i=idx: _open_notes(i))
-            # Botón eliminar
+            note_btn.bind("<Button-1>", lambda e, i=idx, b=note_btn: _open_notes(i, b))            # Botón eliminar
             del_btn = tk.Label(row, text="✕", bg=BG, fg="#333",
                                font=("Courier New", 8), cursor="hand2")
             del_btn.pack(side="right", padx=(0, 4))
@@ -813,7 +821,7 @@ class JustTimer:
             _update_tasks_btn()
 
 
-        def _open_notes(idx):
+        def _open_notes(idx, note_btn=None):
             task = self._session_tasks[idx]
             dlg = tk.Toplevel(win)
             dlg.title("")
@@ -1061,6 +1069,7 @@ class JustTimer:
             if content or has_tasks:
                 self._save_session_log(now, content, energy=energy)
             dlg.destroy()
+            self._show_setup()
             self._session_tasks = []
             try:
                 if self.tasks_btn.winfo_exists():
@@ -1070,6 +1079,7 @@ class JustTimer:
 
         def skip():
             dlg.destroy()
+            self._show_setup()
             self._session_tasks = []
             try:
                 if self.tasks_btn.winfo_exists():
