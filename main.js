@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
+const { autoUpdater } = require("electron-updater");
 
 app.setPath("userData", path.join(__dirname, ".electron-user-data"));
 app.disableHardwareAcceleration();
@@ -52,7 +53,15 @@ function openChildWindow(key, file, options) {
   childWindows.set(key, child);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  // Initialize auto-updater after window is ready
+  try {
+    initAutoUpdater();
+  } catch (e) {
+    console.error('Auto-updater init failed:', e);
+  }
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
@@ -86,3 +95,51 @@ ipcMain.on("session-created", () => {
     mainWindow.webContents.send("sessions-updated");
   }
 });
+
+function initAutoUpdater() {
+  if (!autoUpdater) return;
+
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('update-checking');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Actualización disponible',
+      message: 'Hay una nueva versión. Se descargará en segundo plano.'
+    });
+    mainWindow?.webContents.send('update-available', info);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    mainWindow?.webContents.send('update-not-available');
+  });
+
+  autoUpdater.on('error', (err) => {
+    mainWindow?.webContents.send('update-error', (err && err.stack) || err);
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    mainWindow?.webContents.send('update-progress', progressObj);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Instalar y reiniciar', 'Más tarde'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Actualizar',
+      message: 'La actualización se descargó. ¿Deseas instalarla ahora?'
+    });
+    if (choice === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  // Only check for updates when not in development
+  if (process.env.NODE_ENV !== 'development') {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
+}

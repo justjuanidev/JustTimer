@@ -32,6 +32,13 @@
       ],
       "icon": "logo.ico"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "justjuanidev",
+        "repo": "JustTimer"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -42,5 +49,9 @@
   "devDependencies": {
     "electron": "^28.0.0",
     "electron-builder": "^24.6.0"
+  }
+  ,
+  "dependencies": {
+    "electron-updater": "^5.4.6"
   }
 }
