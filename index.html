@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JustTimer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="main-window">
+  <div class="drag-bar">
+    <span class="close-btn" id="closeBtn" title="Cerrar">&times;</span>
+  </div>
+
+  <div class="panel" id="panelSetup">
+    <div class="section-label">&iquest;De cu&aacute;nto es la sesi&oacute;n?</div>
+    <div class="btn-row" id="durRow">
+      <button class="dur-btn" data-mins="25">25&prime;</button>
+      <button class="dur-btn" data-mins="50">50&prime;</button>
+      <button class="dur-btn" data-mins="75">75&prime;</button>
+      <button class="dur-btn custom-dur-btn" id="customDurBtn" title="Duracion personalizada">&#9998;</button>
+    </div>
+    <div class="custom-dur-row hidden" id="customDurRow">
+      <input type="number" id="customDurInput" placeholder="min" min="1" max="480" />
+      <button id="customDurOk">ok</button>
+    </div>
+
+    <div class="section-label">&iquest;A qu&eacute; hora?</div>
+    <div class="quarter-grid" id="quarterGrid"></div>
+
+    <div class="session-summary" id="sessionSummary"></div>
+    <div class="next-session-card hidden" id="nextSessionCard">
+      <div class="next-label">Empieza en:</div>
+      <div class="next-countdown" id="nextCountdown">--:--</div>
+    </div>
+    <div class="pending-sessions hidden" id="pendingSessions"></div>
+
+    <div class="error-msg hidden" id="errorMsg"></div>
+
+    <div class="bottom-row">
+      <button class="icon-btn" id="calBtn" title="Calendario">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="tasksSetupBtn" title="Tareas">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-5"/><path d="M5 3 2 6"/><path d="m19 3 3 3"/>
+        </svg>
+      </button>
+      <button class="start-session-btn" id="startNowBtn">INICIAR AHORA</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="panelWait">
+    <div class="section-label">Empieza en:</div>
+    <div class="countdown-big" id="waitLabel">--:--:--</div>
+    <div class="wait-info" id="waitInfo"></div>
+    <button class="cancel-btn" id="waitCancelBtn">cancelar</button>
+  </div>
+
+  <div class="panel hidden" id="panelTimer">
+    <div class="countdown-big" id="timerLabel">--:--</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+    <div class="timer-hover-controls">
+      <button class="icon-btn timer-action-btn" id="breakBtn" title="Break">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8h1a4 4 0 0 1 0 8h-1"/><path d="M5 8h11v7a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5Z"/><path d="M6 20h12"/>
+        </svg>
+      </button>
+      <button class="icon-btn timer-action-btn" id="tasksTimerBtn" title="Tareas">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-5"/><path d="M5 3 2 6"/><path d="m19 3 3 3"/>
+        </svg>
+      </button>
+      <button class="icon-btn timer-action-btn" id="calTimerBtn" title="Calendario">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </button>
+      <button class="icon-btn timer-action-btn" id="homeBtn" title="Home">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="panelReview">
+    <div class="review-title">Sesion terminada</div>
+    <label class="review-label" for="reviewType">tipo</label>
+    <div class="review-type-row">
+      <select class="review-input" id="reviewType"></select>
+      <button class="mini-icon-btn" id="addTypeBtn" title="Agregar tipo">+</button>
+      <button class="mini-icon-btn" id="deleteTypeBtn" title="Eliminar tipo">&times;</button>
+    </div>
+    <div class="custom-type-row hidden" id="customTypeRow">
+      <input class="review-input" id="customTypeInput" type="text" maxlength="32" placeholder="nuevo tipo" />
+      <button class="tool-btn primary" id="saveTypeBtn">ok</button>
+    </div>
+    <label class="review-label">tareas</label>
+    <div class="review-task-list" id="reviewTaskList"></div>
+    <label class="review-label" for="reviewNotes">notas</label>
+    <textarea class="review-textarea" id="reviewNotes" rows="5" placeholder="Que hiciste en esta sesion"></textarea>
+    <div class="review-label center">nivel de energia en la sesion</div>
+    <div class="energy-row" id="energyRow"></div>
+    <div class="energy-readout" id="energyReadout">5 / 10 - normal</div>
+    <div class="review-actions">
+      <button class="tool-btn primary" id="saveReviewBtn">guardar</button>
+      <button class="tool-btn" id="skipReviewBtn">omitir</button>
+    </div>
+  </div>
+
+  <script src="scripts.js"></script>
+</body>
+</html>

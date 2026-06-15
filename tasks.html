@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tareas</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="tool-window">
+  <div class="drag-bar">
+    <span class="close-btn" id="closeBtn" title="Cerrar">&times;</span>
+  </div>
+
+  <main class="tool-shell">
+    <div class="tool-header">
+      <div class="tool-title">Tareas de la sesion</div>
+      <button class="tool-btn primary" id="addBtn">Agregar</button>
+    </div>
+
+    <input class="tool-input" id="taskInput" type="text" maxlength="90" placeholder="Nueva tarea" />
+    <section class="task-list" id="taskList"></section>
+    <section class="task-note-panel hidden" id="notePanel">
+      <div class="note-title" id="noteTitle">Notas</div>
+      <textarea class="tool-textarea" id="taskNotesInput" rows="5" placeholder="Notas de esta tarea"></textarea>
+      <div class="note-actions">
+        <button class="tool-btn primary" id="saveNoteBtn">Guardar nota</button>
+        <button class="tool-btn" id="closeNoteBtn">Cerrar</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="tasks.js"></script>
+</body>
+</html>

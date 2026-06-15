@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendario</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="tool-window">
+  <div class="drag-bar">
+    <span class="close-btn" id="closeBtn" title="Cerrar">&times;</span>
+  </div>
+
+  <main class="tool-shell">
+    <div class="tool-header">
+      <div class="tool-title">Planificar sesion</div>
+      <div class="view-toggle" role="group" aria-label="Vista de calendario">
+        <button class="tool-btn view-btn active" id="weekViewBtn">Semana</button>
+        <button class="tool-btn view-btn" id="threeDayViewBtn">3 dias</button>
+      </div>
+      <button class="tool-btn primary" id="saveBtn">Crear sesion</button>
+    </div>
+
+    <div class="calendar-controls">
+      <button class="tool-btn" id="prevWeekBtn" title="Semana anterior">&lt;</button>
+      <button class="tool-btn" id="nextWeekBtn" title="Semana siguiente">&gt;</button>
+      <div class="week-label" id="weekLabel">--</div>
+      <button class="tool-btn" id="todayBtn">Hoy</button>
+      <button class="tool-btn" id="registerModeBtn">Registro</button>
+    </div>
+
+    <div class="calendar-layout">
+      <section class="calendar-grid" id="calendarGrid" aria-label="Calendario semanal"></section>
+      <aside class="session-side-panel" id="sessionSidePanel">
+        <div class="side-empty">Selecciona una sesion para ver detalles</div>
+      </aside>
+    </div>
+
+    <div class="calendar-form">
+      <select class="tool-select" id="durationSelect">
+        <option value="25">25 min</option>
+        <option value="50" selected>50 min</option>
+        <option value="75">75 min</option>
+      </select>
+      <input class="tool-input" id="customDuration" type="number" min="1" max="480" placeholder="otro min" />
+      <input class="tool-input" id="labelInput" type="text" maxlength="40" placeholder="Nombre de Sesión" />
+      <button class="tool-btn" id="clearBtn">X</button>
+    </div>
+
+    <div class="selected-info" id="selectedInfo">Eleg&iacute; un bloque futuro de 15 minutos</div>
+    <div class="error-msg hidden" id="calendarMsg"></div>
+  </main>
+
+  <script src="calendar.js"></script>
+</body>
+</html>
