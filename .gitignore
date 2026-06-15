@@ -5,6 +5,14 @@ node_modules/
 dist/
 .electron-user-data/
 
+# Build artifacts
+/dist/
+/release/
+*.exe
+*.msi
+*.zip
+*.7z
+
 # Logs
 *.log
 npm-debug.log*
@@ -16,6 +24,12 @@ pids/
 *.pid
 *.seed
 *.pid.lock
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
 
 # OS Files
 .DS_Store
