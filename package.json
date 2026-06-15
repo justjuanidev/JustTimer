@@ -23,7 +23,8 @@
       "tasks.js",
       "styles.css",
       "logo.ico",
-      "sonidos/**/*"
+      "sonidos/**/*",
+      "node_modules/**/*"
     ],
     "win": {
       "target": [
@@ -52,6 +53,6 @@
   }
   ,
   "dependencies": {
-    "electron-updater": "^5.4.6"
+    "electron-updater": "^6.1.0"
   }
 }
