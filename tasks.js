@@ -168,9 +168,9 @@ function renderTasks() {
       <input class="task-check" type="checkbox" ${task.done ? "checked" : ""} />
       <button class="task-text" type="button"></button>
       <select class="task-priority" title="Prioridad">
-        <option value="low">verde</option>
-        <option value="medium">naranja</option>
-        <option value="high">rojo</option>
+        <option value="high">P1</option>
+        <option value="medium">P2</option>
+        <option value="low">P3</option>
       </select>
       <button class="task-note ${task.notes ? "has-note" : ""}" type="button" title="Notas">i</button>
       <button class="task-delete" type="button" title="Eliminar">&times;</button>

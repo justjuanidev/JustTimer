@@ -810,8 +810,13 @@ function openTasks() {
   ipcRenderer.send("open-tasks");
 }
 
+function openHabits() {
+  ipcRenderer.send("open-habits");
+}
+
 $("calBtn").addEventListener("click", openCalendar);
 $("tasksSetupBtn").addEventListener("click", openTasks);
+$("habitsBtn").addEventListener("click", openHabits);
 $("calTimerBtn").addEventListener("click", openCalendar);
 $("tasksTimerBtn").addEventListener("click", openTasks);
 

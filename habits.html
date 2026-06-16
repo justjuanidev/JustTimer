@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Habitos</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="tool-window habits-window">
+  <div class="drag-bar">
+    <span class="close-btn" id="closeBtn" title="Cerrar">&times;</span>
+  </div>
+
+  <main class="tool-shell habits-shell">
+    <header class="tool-header">
+      <div>
+        <div class="tool-title">Habitos</div>
+        <div class="habit-subtitle" id="todayLabel">--</div>
+      </div>
+      <button class="tool-btn primary" id="addHabitBtn">+</button>
+    </header>
+
+    <section class="habit-layout">
+      <section class="habit-panel phase-panel" id="phasePanel">
+        <div class="phase-hero" id="phaseHero">
+          <div class="phase-greeting" id="phaseGreeting">Buenos dias</div>
+          <div class="phase-range" id="phaseRange">--</div>
+        </div>
+        <div class="habit-warning hidden" id="phaseWarning"></div>
+        <div class="habit-list" id="phaseHabitList"></div>
+      </section>
+
+      <section class="habit-panel daily-panel" id="dailyPanel">
+        <div class="habit-section-head">
+          <div>
+            <div class="habit-section-title">Habitos del dia</div>
+            <div class="habit-subtitle">Sin horario fijo</div>
+          </div>
+        </div>
+        <div class="habit-warning hidden" id="dailyWarning"></div>
+        <div class="habit-list" id="dailyHabitList"></div>
+      </section>
+    </section>
+
+    <aside class="habit-detail-panel hidden" id="habitDetail"></aside>
+  </main>
+
+  <dialog class="habit-dialog" id="habitFormDialog">
+    <form class="habit-form" id="habitForm">
+      <div class="review-title">Nuevo habito</div>
+      <input class="tool-input" id="habitNameInput" maxlength="80" placeholder="Nombre del habito" />
+      <select class="tool-select" id="habitKindSelect">
+        <option value="phase">Por momento del dia</option>
+        <option value="daily">Del dia</option>
+      </select>
+      <select class="tool-select" id="habitPhaseSelect">
+        <option value="morning">Manana</option>
+        <option value="afternoon">Tarde</option>
+        <option value="night">Noche</option>
+      </select>
+      <input class="tool-input" id="habitTargetInput" type="number" min="1" max="20" value="1" placeholder="Veces por dia" />
+      <div class="habit-days" id="habitDays"></div>
+      <div class="note-actions">
+        <button class="tool-btn primary" type="submit">Guardar</button>
+        <button class="tool-btn" id="cancelHabitFormBtn" type="button">Cancelar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="habit-dialog" id="habitLogDialog">
+    <form class="habit-form" id="habitLogForm">
+      <div class="review-title" id="habitLogTitle">Completar habito</div>
+      <textarea class="tool-textarea" id="habitLogNotes" rows="5" placeholder="Notas"></textarea>
+      <label class="review-label" for="habitDifficulty">cuanto me costo</label>
+      <input class="tool-input" id="habitDifficulty" type="range" min="1" max="10" value="5" />
+      <div class="energy-readout" id="habitDifficultyReadout">5 / 10</div>
+      <div class="note-actions">
+        <button class="tool-btn primary" type="submit">Guardar</button>
+        <button class="tool-btn" id="cancelHabitLogBtn" type="button">Cancelar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="habits.js"></script>
+</body>
+</html>

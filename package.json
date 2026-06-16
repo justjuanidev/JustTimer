@@ -2,6 +2,7 @@
   "name": "justtimer",
   "version": "1.2.4",
   "description": "JustTimer - focus session timer",
+  "author": "JustJuani",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -17,10 +18,12 @@
       "index.html",
       "calendar.html",
       "tasks.html",
+      "habits.html",
       "main.js",
       "scripts.js",
       "calendar.js",
       "tasks.js",
+      "habits.js",
       "styles.css",
       "logo.ico",
       "sonidos/**/*",
@@ -42,16 +45,16 @@
     ],
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
   },
   "devDependencies": {
-    "electron": "^28.0.0",
+    "electron": "^28.3.3",
     "electron-builder": "^24.6.0"
-  }
-  ,
+  },
   "dependencies": {
     "electron-updater": "^6.1.0"
   }

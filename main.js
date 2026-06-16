@@ -1,8 +1,53 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const { autoUpdater } = require("electron-updater");
 
-app.setPath("userData", path.join(__dirname, ".electron-user-data"));
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.justjuani.justtimer");
+}
+
+function canUseDirectory(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const testFile = path.join(dir, ".write-test");
+    fs.writeFileSync(testFile, "ok");
+    fs.unlinkSync(testFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function copyUserDataIfNeeded(fromDir, toDir) {
+  try {
+    if (!fromDir || fromDir === toDir || !fs.existsSync(fromDir)) return;
+    const targetHasData = fs.existsSync(toDir) && fs.readdirSync(toDir).length > 0;
+    if (targetHasData) return;
+    fs.mkdirSync(toDir, { recursive: true });
+    fs.cpSync(fromDir, toDir, { recursive: true, force: false, errorOnExist: false });
+  } catch (error) {
+    console.warn("User data migration skipped:", error);
+  }
+}
+
+function configureUserDataPath() {
+  if (!app.isPackaged) {
+    app.setPath("userData", path.join(__dirname, ".electron-user-data"));
+    return;
+  }
+
+  const defaultUserData = app.getPath("userData");
+  const exeDir = path.dirname(app.getPath("exe"));
+  const localUserData = path.join(exeDir, "JustTimer-data");
+
+  if (canUseDirectory(localUserData)) {
+    copyUserDataIfNeeded(defaultUserData, localUserData);
+    app.setPath("userData", localUserData);
+  }
+}
+
+configureUserDataPath();
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("disable-gpu-compositing");
@@ -88,6 +133,10 @@ ipcMain.on("open-calendar", () => {
 
 ipcMain.on("open-tasks", () => {
   openChildWindow("tasks", "tasks.html", { width: 380, height: 520, resizable: true });
+});
+
+ipcMain.on("open-habits", () => {
+  openChildWindow("habits", "habits.html", { width: 760, height: 560, resizable: true });
 });
 
 ipcMain.on("session-created", () => {
