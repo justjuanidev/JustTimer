@@ -13,12 +13,27 @@
 
   <main class="tool-shell">
     <div class="tool-header">
-      <div class="tool-title">Tareas de la sesion</div>
+      <div class="tab-toggle" role="group" aria-label="Vista de tareas">
+        <button class="tool-btn view-btn active" id="tabSession">Sesión</button>
+        <button class="tool-btn view-btn" id="tabDay">Día</button>
+      </div>
       <button class="tool-btn primary" id="addBtn">Agregar</button>
     </div>
 
     <input class="tool-input" id="taskInput" type="text" maxlength="90" placeholder="Nueva tarea" />
-    <section class="task-list" id="taskList"></section>
+
+    <!-- Vista sesión -->
+    <section id="viewSession">
+      <div class="tasks-view-label" id="sessionViewLabel">Tareas de la sesion</div>
+      <section class="task-list" id="taskList"></section>
+    </section>
+
+    <!-- Vista día -->
+    <section id="viewDay" class="hidden">
+      <div class="tasks-view-label">Tareas del dia</div>
+      <section class="task-list" id="dayTaskList"></section>
+    </section>
+
     <section class="task-note-panel hidden" id="notePanel">
       <div class="note-title" id="noteTitle">Notas</div>
       <textarea class="tool-textarea" id="taskNotesInput" rows="5" placeholder="Notas de esta tarea"></textarea>

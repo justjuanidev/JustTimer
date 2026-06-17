@@ -716,6 +716,10 @@ body.main-window .close-btn {
   opacity: 0.5;
 }
 
+.task-row.day-task {
+  grid-template-columns: 18px 22px minmax(0, 1fr) 86px 28px 26px 28px;
+}
+
 .task-drag {
   color: rgba(255,255,255,0.45);
   font-size: 16px;
@@ -1415,4 +1419,62 @@ body.main-window .close-btn {
 .habit-day input:checked + span {
   background: var(--accent);
   color: white;
+}
+
+/* Day tasks & tab toggle */
+.tab-toggle {
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.tab-toggle .view-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  background: rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.14);
+  transition: background 0.14s, color 0.14s;
+}
+
+.tab-toggle .view-btn.active {
+  background: rgba(255,255,255,0.32);
+  color: white;
+  border-color: rgba(255,255,255,0.38);
+}
+
+.tasks-view-label {
+  font-size: 11px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.48);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 2px 2px;
+}
+
+.day-task-to-session {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.7);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.13s, color 0.13s;
+}
+
+.day-task-to-session:hover {
+  background: rgba(47, 128, 237, 0.6);
+  color: white;
+}
+
+.day-task-to-session.in-session {
+  background: rgba(42, 170, 94, 0.28);
+  color: rgba(100, 255, 150, 0.8);
+  cursor: default;
 }

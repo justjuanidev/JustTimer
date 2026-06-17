@@ -2,9 +2,13 @@ const { ipcRenderer } = require("electron");
 
 const SESSIONS_KEY = "justtimer.sessions.v1";
 const TASKS_KEY = "justtimer.tasks.v1";
+const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
+
 let activeNoteTaskId = null;
+let activeNoteScope = "session"; // "session" | "day"
 let draggedTaskId = null;
+let activeView = "session"; // "session" | "day"
 const soundCache = new Map();
 
 function $(id) {
@@ -24,13 +28,17 @@ function playSound(name) {
   }
 }
 
-function readTasks() {
+function readJsonArray(key) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(TASKS_KEY) || "[]");
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
+}
+
+function readTasks() {
+  return readJsonArray(TASKS_KEY);
 }
 
 function writeTasks(tasks) {
@@ -38,13 +46,27 @@ function writeTasks(tasks) {
   syncActiveSessionTasks(tasks);
 }
 
+function readDayTasks() {
+  return readJsonArray(DAY_TASKS_KEY);
+}
+
+function writeDayTasks(tasks) {
+  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(tasks));
+}
+
+// Generic accessors so the rest of the file can work with "the active scope"
+// instead of branching everywhere.
+function readScope(scope) {
+  return scope === "day" ? readDayTasks() : readTasks();
+}
+
+function writeScope(scope, tasks) {
+  if (scope === "day") writeDayTasks(tasks);
+  else writeTasks(tasks);
+}
+
 function readSessions() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return readJsonArray(SESSIONS_KEY);
 }
 
 function writeSessions(sessions) {
@@ -84,12 +106,8 @@ function getSessionTiming() {
   };
 }
 
-function addTask() {
-  const text = $("taskInput").value.trim();
-  if (!text) return;
-
-  const tasks = readTasks();
-  tasks.push({
+function makeTask(text) {
+  return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     text,
     done: false,
@@ -97,18 +115,27 @@ function addTask() {
     priority: "medium",
     deleted: false,
     createdAt: new Date().toISOString(),
-  });
-
-  writeTasks(tasks);
-  $("taskInput").value = "";
-  renderTasks();
+  };
 }
 
-function openTaskNotes(taskId) {
-  const task = readTasks().find(item => item.id === taskId);
+function addTask() {
+  const text = $("taskInput").value.trim();
+  if (!text) return;
+
+  const tasks = readScope(activeView);
+  tasks.push(makeTask(text));
+  writeScope(activeView, tasks);
+
+  $("taskInput").value = "";
+  renderAll();
+}
+
+function openTaskNotes(taskId, scope) {
+  const task = readScope(scope).find(item => item.id === taskId);
   if (!task) return;
 
   activeNoteTaskId = taskId;
+  activeNoteScope = scope;
   $("noteTitle").textContent = task.text;
   $("taskNotesInput").value = task.notes || "";
   $("notePanel").classList.remove("hidden");
@@ -119,25 +146,25 @@ function saveTaskNote() {
   if (!activeNoteTaskId) return;
 
   const notes = $("taskNotesInput").value.trim();
-  writeTasks(readTasks().map(task =>
+  writeScope(activeNoteScope, readScope(activeNoteScope).map(task =>
     task.id === activeNoteTaskId ? { ...task, notes } : task
   ));
   $("notePanel").classList.add("hidden");
   activeNoteTaskId = null;
-  renderTasks();
+  renderAll();
 }
 
-function renameTask(taskId) {
-  const task = readTasks().find(item => item.id === taskId);
+function renameTask(taskId, scope) {
+  const task = readScope(scope).find(item => item.id === taskId);
   if (!task) return;
   const nextText = window.prompt("Editar tarea", task.text);
   if (nextText === null) return;
   const text = nextText.trim();
   if (!text) return;
-  writeTasks(readTasks().map(item =>
+  writeScope(scope, readScope(scope).map(item =>
     item.id === taskId ? { ...item, text, renamedAt: new Date().toISOString() } : item
   ));
-  renderTasks();
+  renderAll();
 }
 
 function closeTaskNote() {
@@ -145,24 +172,55 @@ function closeTaskNote() {
   activeNoteTaskId = null;
 }
 
-function renderTasks() {
-  const list = $("taskList");
-  const tasks = readTasks().filter(task => !task.deleted);
-  list.innerHTML = "";
+function setView(view) {
+  activeView = view;
+  $("tabSession").classList.toggle("active", view === "session");
+  $("tabDay").classList.toggle("active", view === "day");
+  $("viewSession").classList.toggle("hidden", view !== "session");
+  $("viewDay").classList.toggle("hidden", view !== "day");
+  $("taskInput").placeholder = view === "day" ? "Nueva tarea del dia" : "Nueva tarea";
+}
+
+function renderAll() {
+  renderTaskList({
+    listEl: $("taskList"),
+    scope: "session",
+    emptyText: "Sin tareas todavia",
+  });
+  renderTaskList({
+    listEl: $("dayTaskList"),
+    scope: "day",
+    emptyText: "Sin tareas del dia todavia",
+  });
+}
+
+function renderTaskList({ listEl, scope, emptyText }) {
+  const tasks = readScope(scope).filter(task => !task.deleted);
+  listEl.innerHTML = "";
 
   if (!tasks.length) {
     const empty = document.createElement("div");
     empty.className = "pending-row";
-    empty.textContent = "Sin tareas todavia";
-    list.appendChild(empty);
+    empty.textContent = emptyText;
+    listEl.appendChild(empty);
     return;
   }
 
+  const sessionTasks = scope === "day" ? readTasks() : null;
+
   tasks.forEach(task => {
+    const isDay = scope === "day";
+    const movedToSession = isDay && sessionTasks.some(item => item.movedFromDayTaskId === task.id);
+
     const row = document.createElement("div");
-    row.className = `task-row priority-${task.priority || "medium"} ${task.done ? "done" : ""}`;
+    row.className = `task-row ${isDay ? "day-task" : ""} priority-${task.priority || "medium"} ${task.done ? "done" : ""}`;
     row.draggable = true;
     row.dataset.taskId = task.id;
+
+    const moveButtonHtml = isDay
+      ? `<button class="day-task-to-session ${movedToSession ? "in-session" : ""}" type="button" title="${movedToSession ? "Ya esta en la sesion" : "Mover a la sesion"}">${movedToSession ? "✓" : "→"}</button>`
+      : "";
+
     row.innerHTML = `
       <span class="task-drag" title="Mover">::</span>
       <input class="task-check" type="checkbox" ${task.done ? "checked" : ""} />
@@ -173,12 +231,14 @@ function renderTasks() {
         <option value="low">P3</option>
       </select>
       <button class="task-note ${task.notes ? "has-note" : ""}" type="button" title="Notas">i</button>
+      ${moveButtonHtml}
       <button class="task-delete" type="button" title="Eliminar">&times;</button>
     `;
     row.querySelector(".task-priority").value = task.priority || "medium";
     row.querySelector(".task-text").textContent = task.done && Number.isFinite(task.completionElapsedMin)
       ? `${task.text} · min ${task.completionElapsedMin}`
       : task.text;
+
     row.addEventListener("dragstart", event => {
       draggedTaskId = task.id;
       row.classList.add("dragging");
@@ -196,14 +256,15 @@ function renderTasks() {
     row.addEventListener("drop", event => {
       event.preventDefault();
       const sourceId = draggedTaskId || event.dataTransfer.getData("text/plain");
-      reorderTasks(sourceId, task.id);
+      reorderTasks(scope, sourceId, task.id);
     });
+
     row.querySelector(".task-check").addEventListener("change", event => {
       const checked = event.target.checked;
-      const nextTasks = readTasks().map(item =>
-        item.id === task.id ? withCompletionTiming(item, checked) : item
+      const nextTasks = readScope(scope).map(item =>
+        item.id === task.id ? withCompletionTiming(item, checked, scope) : item
       );
-      writeTasks(nextTasks);
+      writeScope(scope, nextTasks);
       if (checked) {
         playSound("task_done");
         const visibleTasks = nextTasks.filter(item => !item.deleted);
@@ -211,21 +272,31 @@ function renderTasks() {
           playSound("all_done");
         }
       }
-      renderTasks();
+      renderAll();
     });
+
     row.querySelector(".task-priority").addEventListener("change", event => {
-      writeTasks(readTasks().map(item =>
+      writeScope(scope, readScope(scope).map(item =>
         item.id === task.id ? { ...item, priority: event.target.value } : item
       ));
-      renderTasks();
+      renderAll();
     });
-    row.querySelector(".task-text").addEventListener("click", () => openTaskNotes(task.id));
-    row.querySelector(".task-text").addEventListener("dblclick", () => renameTask(task.id));
-    row.querySelector(".task-note").addEventListener("click", () => openTaskNotes(task.id));
+
+    row.querySelector(".task-text").addEventListener("click", () => openTaskNotes(task.id, scope));
+    row.querySelector(".task-text").addEventListener("dblclick", () => renameTask(task.id, scope));
+    row.querySelector(".task-note").addEventListener("click", () => openTaskNotes(task.id, scope));
+
+    if (isDay) {
+      row.querySelector(".day-task-to-session").addEventListener("click", () => {
+        if (movedToSession) return;
+        moveDayTaskToSession(task.id);
+      });
+    }
+
     row.querySelector(".task-delete").addEventListener("click", () => {
-      const active = getSessionTiming();
+      const active = scope === "session" ? getSessionTiming() : null;
       if (active) {
-        writeTasks(readTasks().map(item =>
+        writeScope(scope, readScope(scope).map(item =>
           item.id === task.id
             ? {
                 ...item,
@@ -239,30 +310,52 @@ function renderTasks() {
             : item
         ));
       } else {
-        writeTasks(readTasks().filter(item => item.id !== task.id));
+        writeScope(scope, readScope(scope).filter(item => item.id !== task.id));
       }
-      if (activeNoteTaskId === task.id) closeTaskNote();
-      renderTasks();
+      if (activeNoteTaskId === task.id && activeNoteScope === scope) closeTaskNote();
+      renderAll();
     });
-    list.appendChild(row);
+
+    listEl.appendChild(row);
   });
 }
 
-function reorderTasks(sourceId, targetId) {
+function moveDayTaskToSession(dayTaskId) {
+  const dayTasks = readDayTasks();
+  const dayTask = dayTasks.find(item => item.id === dayTaskId);
+  if (!dayTask) return;
+
+  const sessionTasks = readTasks();
+  if (sessionTasks.some(item => item.movedFromDayTaskId === dayTaskId)) {
+    renderAll();
+    return;
+  }
+
+  sessionTasks.push({
+    ...makeTask(dayTask.text),
+    priority: dayTask.priority || "medium",
+    notes: dayTask.notes || "",
+    movedFromDayTaskId: dayTask.id,
+  });
+  writeTasks(sessionTasks);
+  renderAll();
+}
+
+function reorderTasks(scope, sourceId, targetId) {
   if (!sourceId || !targetId || sourceId === targetId) return;
 
-  const tasks = readTasks();
+  const tasks = readScope(scope);
   const sourceIndex = tasks.findIndex(task => task.id === sourceId);
   const targetIndex = tasks.findIndex(task => task.id === targetId);
   if (sourceIndex < 0 || targetIndex < 0) return;
 
   const [source] = tasks.splice(sourceIndex, 1);
   tasks.splice(targetIndex, 0, source);
-  writeTasks(tasks);
-  renderTasks();
+  writeScope(scope, tasks);
+  renderAll();
 }
 
-function withCompletionTiming(task, done) {
+function withCompletionTiming(task, done, scope) {
   if (!done) {
     const {
       completedAt,
@@ -275,7 +368,9 @@ function withCompletionTiming(task, done) {
     return { ...rest, done: false };
   }
 
-  const active = getSessionTiming();
+  // Elapsed-time tracking only makes sense relative to a running session,
+  // which day tasks aren't part of.
+  const active = scope === "session" ? getSessionTiming() : null;
   if (!active) {
     return {
       ...task,
@@ -305,5 +400,8 @@ $("taskNotesInput").addEventListener("keydown", event => {
   if (event.ctrlKey && event.key === "Enter") saveTaskNote();
 });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
+$("tabSession").addEventListener("click", () => setView("session"));
+$("tabDay").addEventListener("click", () => setView("day"));
 
-renderTasks();
+setView("session");
+renderAll();
