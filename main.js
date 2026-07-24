@@ -52,14 +52,15 @@ function configureUserDataPath() {
     return;
   }
 
+  // Keep data in Electron's stable user profile directory.  Previous builds
+  // placed it beside the executable, which can be removed by an installer
+  // update.  Only copy a legacy folder into an empty profile; never replace
+  // data that is already there.
   const defaultUserData = app.getPath("userData");
   const exeDir = path.dirname(app.getPath("exe"));
-  const localUserData = path.join(exeDir, "JustTimer-data");
+  const legacyUserData = path.join(exeDir, "JustTimer-data");
 
-  if (canUseDirectory(localUserData)) {
-    copyUserDataIfNeeded(defaultUserData, localUserData);
-    app.setPath("userData", localUserData);
-  }
+  if (fs.existsSync(legacyUserData)) copyUserDataIfNeeded(legacyUserData, defaultUserData);
 }
 
 configureUserDataPath();
