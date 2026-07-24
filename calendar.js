@@ -1,12 +1,15 @@
 const { ipcRenderer } = require("electron");
 
 const SESSIONS_KEY = "justtimer.sessions.v1";
+const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
+const PROJECTS_KEY = "justtimer.projects.v1";
 const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 const SLOT_HEIGHT = 28;
 
 let weekStart = startOfWeek(new Date());
 let selectedStart = null;
 let selectedSessionId = null;
+let selectedHistoryDay = null; // "YYYY-MM-DD" of the day whose task history is shown
 let visibleDays = 7;
 let didAutoScroll = false;
 let registerMode = false;
@@ -26,6 +29,34 @@ function readSessions() {
 
 function writeSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+}
+
+function readProjects() {
+  return readJsonArray(PROJECTS_KEY);
+}
+
+function readJsonArray(key) {
+  try { const parsed = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+function readDayTasks() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DAY_TASKS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function sameDayKey(isoValue, key) {
+  if (!isoValue) return false;
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return false;
+  return dateKey(date) === key;
 }
 
 function startOfWeek(date) {
@@ -128,7 +159,20 @@ function renderCalendar() {
 
   grid.appendChild(cell("cal-corner", ""));
   days.forEach(day => {
-    grid.appendChild(cell("cal-day-head", `${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}`));
+    const key = dateKey(day);
+    const head = cell(
+      `cal-day-head ${selectedHistoryDay === key ? "day-selected" : ""}`,
+      `${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}`
+    );
+    head.title = "Ver historial de tareas de este dia";
+    head.addEventListener("click", () => {
+      selectedStart = null;
+      selectedSessionId = null;
+      selectedHistoryDay = selectedHistoryDay === key ? null : key;
+      renderSidePanel();
+      renderCalendar();
+    });
+    grid.appendChild(head);
   });
 
   const now = new Date();
@@ -177,6 +221,7 @@ function renderCalendar() {
             event.stopPropagation();
             selectedStart = null;
             selectedSessionId = session.id;
+            selectedHistoryDay = null;
             renderSidePanel();
             renderCalendar();
           });
@@ -184,6 +229,7 @@ function renderCalendar() {
           slot.addEventListener("click", () => {
             selectedStart = slotTime;
             selectedSessionId = null;
+            selectedHistoryDay = null;
             renderSidePanel();
             renderCalendar();
           });
@@ -210,8 +256,46 @@ function cell(className, text) {
   return el;
 }
 
+function dayHistoryTaskMarkup(task, kind) {
+  const note = task.notes ? `<div class="side-task-note">${escapeHtml(task.notes)}</div>` : "";
+  const timeLabel = kind === "done"
+    ? fmtHour(new Date(task.completedAt))
+    : fmtHour(new Date(task.deletedAt));
+  const statusTag = kind === "done" ? "[x] completada" : "[eliminada]";
+  return `
+    <div class="side-task ${kind === "done" ? "done" : "deleted"}">
+      <div>${statusTag} ${timeLabel} · ${escapeHtml(task.text)}</div>
+      ${note}
+    </div>
+  `;
+}
+
+function renderDayHistory(panel, key) {
+  const dayTasks = readDayTasks();
+  const doneThatDay = dayTasks.filter(task => sameDayKey(task.completedAt, key));
+  const deletedThatDay = dayTasks.filter(task => sameDayKey(task.deletedAt, key) && !sameDayKey(task.completedAt, key));
+
+  const [year, month, day] = key.split("-").map(Number);
+  const label = `${pad(day)}/${pad(month)}/${year}`;
+
+  panel.innerHTML = `
+    <div class="side-title">Historial del dia</div>
+    <div class="side-meta">${label}</div>
+    <div class="side-section">Tareas completadas</div>
+    ${doneThatDay.length ? doneThatDay.map(task => dayHistoryTaskMarkup(task, "done")).join("") : `<div class="side-copy">(ninguna)</div>`}
+    <div class="side-section">Tareas eliminadas</div>
+    ${deletedThatDay.length ? deletedThatDay.map(task => dayHistoryTaskMarkup(task, "deleted")).join("") : `<div class="side-copy">(ninguna)</div>`}
+  `;
+}
+
 function renderSidePanel() {
   const panel = $("sessionSidePanel");
+
+  if (selectedHistoryDay) {
+    renderDayHistory(panel, selectedHistoryDay);
+    return;
+  }
+
   const session = readSessions().find(item => item.id === selectedSessionId);
 
   if (!session) {
@@ -229,6 +313,7 @@ function renderSidePanel() {
         <input class="tool-input" id="sideStart" type="datetime-local" value="${toDateTimeLocal(start)}" />
         <input class="tool-input" id="sideDuration" type="number" min="1" max="480" value="${Math.max(1, Math.round((session.durationSecs || 0) / 60))}" />
       </div>
+      <select class="tool-select" id="sideProject"><option value="">Sin proyecto</option>${readProjects().filter(project => !project.archived).map(project => `<option value="${escapeAttr(project.id)}">${escapeHtml(project.title)}</option>`).join("")}</select>
       <div class="side-edit-grid">
         <select class="tool-select" id="sideStatus">
           <option value="pending">pendiente</option>
@@ -259,6 +344,7 @@ function renderSidePanel() {
   `;
   $("sideStatus").value = session.status || "done";
   $("sideEnergy").value = session.energy ? String(session.energy) : "";
+  $("sideProject").value = session.projectId || "";
   $("sideEditForm").addEventListener("submit", event => {
     event.preventDefault();
     saveSessionEdits(session.id);
@@ -346,6 +432,8 @@ function saveSessionEdits(id) {
     }).filter(task => task.text);
 
     const status = $("sideStatus").value;
+    const projectId = $("sideProject").value || null;
+    const project = readProjects().find(item => item.id === projectId);
     const fallbackEnd = new Date(start.getTime() + durationMinutes * 60_000).toISOString();
     return {
       ...session,
@@ -355,6 +443,8 @@ function saveSessionEdits(id) {
       status,
       notes: $("sideNotes").value.trim(),
       energy: $("sideEnergy").value ? Number($("sideEnergy").value) : null,
+      projectId,
+      projectName: project?.title || null,
       tasks,
       completedAt: status === "done" ? (session.completedAt || nowIso) : session.completedAt,
       endedAt: status === "done" ? (session.endedAt || fallbackEnd) : session.endedAt,
@@ -459,6 +549,7 @@ function moveRange(direction) {
   weekStart = addDays(weekStart, direction * visibleDays);
   selectedStart = null;
   selectedSessionId = null;
+  selectedHistoryDay = null;
   didAutoScroll = false;
   renderSidePanel();
   renderCalendar();
@@ -469,6 +560,7 @@ function goToday() {
   weekStart.setHours(0, 0, 0, 0);
   selectedStart = null;
   selectedSessionId = null;
+  selectedHistoryDay = null;
   didAutoScroll = false;
   renderSidePanel();
   renderCalendar();

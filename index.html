@@ -24,6 +24,10 @@
       <button id="customDurOk">ok</button>
     </div>
 
+    <select class="session-project-select" id="sessionProjectSelect" title="Proyecto de esta sesión">
+      <option value="">Sin proyecto</option>
+    </select>
+
     <div class="section-label">&iquest;A qu&eacute; hora?</div>
     <div class="quarter-grid" id="quarterGrid"></div>
 
@@ -50,6 +54,11 @@
       <button class="icon-btn" id="habitsBtn" title="Habitos">
         <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="statsBtn" title="Analitica">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-4"/><path d="M12 16V8"/><path d="M16 16v-7"/>
         </svg>
       </button>
       <button class="start-session-btn" id="startNowBtn">INICIAR</button>
@@ -94,6 +103,8 @@
 
   <div class="panel hidden" id="panelReview">
     <div class="review-title">Sesion terminada</div>
+    <label class="review-label" for="reviewProject">proyecto</label>
+    <select class="review-input" id="reviewProject"><option value="">Sin proyecto</option></select>
     <label class="review-label" for="reviewType">tipo</label>
     <div class="review-type-row">
       <select class="review-input" id="reviewType"></select>

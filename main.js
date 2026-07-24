@@ -2,6 +2,21 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { autoUpdater } = require("electron-updater");
+const log = {
+  info: (...args) => {
+    try { fs.appendFileSync(path.join(app.getPath('userData'), 'updater.log'), '[INFO] ' + args.join(' ') + '\n'); } catch (e) {}
+    console.log(...args);
+  },
+  warn: (...args) => {
+    try { fs.appendFileSync(path.join(app.getPath('userData'), 'updater.log'), '[WARN] ' + args.join(' ') + '\n'); } catch (e) {}
+    console.warn(...args);
+  },
+  error: (...args) => {
+    try { fs.appendFileSync(path.join(app.getPath('userData'), 'updater.log'), '[ERROR] ' + args.join(' ') + '\n'); } catch (e) {}
+    console.error(...args);
+  }
+};
+autoUpdater.logger = log;
 
 if (process.platform === "win32") {
   app.setAppUserModelId("com.justjuani.justtimer");
@@ -135,14 +150,50 @@ ipcMain.on("open-tasks", () => {
   openChildWindow("tasks", "tasks.html", { width: 380, height: 520, resizable: true });
 });
 
+ipcMain.on("open-day-tasks", () => {
+  openChildWindow("day-tasks", "day.html", { width: 1020, height: 720, resizable: true });
+});
+
+ipcMain.handle("select-project-image", async event => {
+  const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  const result = await dialog.showOpenDialog(owner, {
+    title: "Elegir imagen del proyecto",
+    properties: ["openFile"],
+    filters: [{ name: "Imágenes", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const imagePath = result.filePaths[0];
+  const extension = path.extname(imagePath).slice(1).toLowerCase().replace("jpg", "jpeg");
+  return `data:image/${extension};base64,${fs.readFileSync(imagePath).toString("base64")}`;
+});
+
 ipcMain.on("open-habits", () => {
   openChildWindow("habits", "habits.html", { width: 760, height: 560, resizable: true });
+});
+
+ipcMain.on("open-stats", () => {
+  openChildWindow("stats", "stats.html", { width: 980, height: 720, resizable: true });
 });
 
 ipcMain.on("session-created", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("sessions-updated");
   }
+  for (const window of childWindows.values()) {
+    if (!window.isDestroyed()) window.webContents.send("sessions-updated");
+  }
+});
+
+ipcMain.handle("export-analytics", async (event, payload) => {
+  const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  const result = await dialog.showSaveDialog(owner, {
+    title: "Exportar analitica de sesiones",
+    defaultPath: `justtimer-analitica-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePath) return { saved: false };
+  fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2), "utf8");
+  return { saved: true, path: result.filePath };
 });
 
 function initAutoUpdater() {
@@ -153,12 +204,14 @@ function initAutoUpdater() {
   });
 
   autoUpdater.on('update-available', (info) => {
+    log.info('Update available, starting download...');
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Actualización disponible',
       message: 'Hay una nueva versión. Se descargará en segundo plano.'
     });
     mainWindow?.webContents.send('update-available', info);
+    autoUpdater.downloadUpdate().catch(err => log.error('downloadUpdate failed:', err));
   });
 
   autoUpdater.on('update-not-available', () => {

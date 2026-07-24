@@ -225,16 +225,18 @@ function renderTaskList({ listEl, scope, emptyText }) {
       <span class="task-drag" title="Mover">::</span>
       <input class="task-check" type="checkbox" ${task.done ? "checked" : ""} />
       <button class="task-text" type="button"></button>
-      <select class="task-priority" title="Prioridad">
-        <option value="high">P1</option>
-        <option value="medium">P2</option>
-        <option value="low">P3</option>
-      </select>
+      <div class="task-priority-wrap">
+        <button class="task-priority priority-${task.priority || "medium"}" type="button" title="Cambiar prioridad">⚑</button>
+        <div class="task-priority-menu hidden">
+          <button type="button" data-priority="high">P1</button>
+          <button type="button" data-priority="medium">P2</button>
+          <button type="button" data-priority="low">P3</button>
+        </div>
+      </div>
       <button class="task-note ${task.notes ? "has-note" : ""}" type="button" title="Notas">i</button>
       ${moveButtonHtml}
       <button class="task-delete" type="button" title="Eliminar">&times;</button>
     `;
-    row.querySelector(".task-priority").value = task.priority || "medium";
     row.querySelector(".task-text").textContent = task.done && Number.isFinite(task.completionElapsedMin)
       ? `${task.text} · min ${task.completionElapsedMin}`
       : task.text;
@@ -275,12 +277,19 @@ function renderTaskList({ listEl, scope, emptyText }) {
       renderAll();
     });
 
-    row.querySelector(".task-priority").addEventListener("change", event => {
+    const priorityWrap = row.querySelector(".task-priority-wrap");
+    priorityWrap.querySelector(".task-priority").addEventListener("click", () => {
+      document.querySelectorAll(".task-priority-menu").forEach(menu => {
+        if (menu !== priorityWrap.querySelector(".task-priority-menu")) menu.classList.add("hidden");
+      });
+      priorityWrap.querySelector(".task-priority-menu").classList.toggle("hidden");
+    });
+    priorityWrap.querySelectorAll("[data-priority]").forEach(button => button.addEventListener("click", () => {
       writeScope(scope, readScope(scope).map(item =>
-        item.id === task.id ? { ...item, priority: event.target.value } : item
+        item.id === task.id ? { ...item, priority: button.dataset.priority } : item
       ));
       renderAll();
-    });
+    }));
 
     row.querySelector(".task-text").addEventListener("click", () => openTaskNotes(task.id, scope));
     row.querySelector(".task-text").addEventListener("dblclick", () => renameTask(task.id, scope));
@@ -307,6 +316,14 @@ function renderTaskList({ listEl, scope, emptyText }) {
                 deletedRemainingSecs: active.remainingSecs,
                 deletedRemainingMin: active.remainingMin,
               }
+            : item
+        ));
+      } else if (scope === "day") {
+        // Day tasks keep a deletion record (no session timing applies) so
+        // the calendar's per-day history can still show they existed.
+        writeScope(scope, readScope(scope).map(item =>
+          item.id === task.id
+            ? { ...item, deleted: true, deletedAt: new Date().toISOString() }
             : item
         ));
       } else {
@@ -401,7 +418,7 @@ $("taskNotesInput").addEventListener("keydown", event => {
 });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 $("tabSession").addEventListener("click", () => setView("session"));
-$("tabDay").addEventListener("click", () => setView("day"));
+$("tabDay").addEventListener("click", () => ipcRenderer.send("open-day-tasks"));
 
 setView("session");
 renderAll();

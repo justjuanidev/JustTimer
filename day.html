@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mis tareas</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="tool-window">
+  <div class="drag-bar"><span class="close-btn" id="closeBtn" title="Cerrar">&times;</span></div>
+  <main class="tool-shell day-shell">
+    <header class="tool-header day-header">
+      <div><div class="tool-title">Mis tareas</div><div class="day-subtitle" id="daySubtitle">Organizá tu día y tus proyectos</div></div>
+      <div class="mode-switch" role="group" aria-label="Modo">
+        <button class="tool-btn active" data-mode="work">Trabajo</button>
+        <button class="tool-btn" data-mode="personal">Personal</button>
+      </div>
+    </header>
+    <nav class="day-nav" aria-label="Filtros de tareas">
+      <button class="day-filter active" data-category="all">Todas</button>
+      <button class="day-filter" data-category="inbox">Inbox</button>
+      <button class="day-filter" data-category="actionable">Accionable</button>
+      <button class="day-filter" data-category="incubator">Incubadora</button>
+      <button class="day-filter" data-category="snooze">Snooze</button>
+    </nav>
+    <section class="day-add-card">
+      <input class="tool-input" id="newTaskInput" maxlength="160" placeholder="Agregar una tarea" />
+      <select class="tool-select" id="newTaskCategory">
+        <option value="inbox">Inbox</option><option value="actionable">Accionable</option><option value="incubator">Incubadora</option><option value="snooze">Snooze</option>
+      </select>
+      <input class="tool-input" id="newTaskDue" type="date" title="Fecha límite" />
+      <button class="tool-btn primary" id="addTaskBtn">Agregar</button>
+    </section>
+    <section class="day-project-context hidden" id="projectContext"></section>
+    <section class="day-task-list" id="dayTaskList"></section>
+    <section class="projects-section" id="projectsSection">
+      <div class="projects-header"><div><div class="stats-card-title">Proyectos</div><div class="day-subtitle">Abrí uno para ver y organizar sus tareas.</div></div><div class="project-actions"><button class="tool-btn" id="archivedProjectsBtn">Archivados</button><button class="tool-btn" id="newProjectBtn">Nuevo proyecto</button></div></div>
+      <form class="project-form hidden" id="projectForm">
+        <input class="tool-input" id="projectName" maxlength="60" placeholder="Nombre del proyecto" />
+        <input class="tool-input" id="projectImage" type="url" placeholder="URL de imagen (opcional)" />
+        <button class="tool-btn" type="button" id="uploadProjectImageBtn">Subir imagen</button>
+        <button class="tool-btn primary" type="submit">Crear</button>
+      </form>
+      <div class="project-grid" id="projectGrid"></div>
+    </section>
+  </main>
+  <script src="day.js"></script>
+</body>
+</html>

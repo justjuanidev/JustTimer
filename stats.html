@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analítica</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="tool-window">
+  <div class="drag-bar"><span class="close-btn" id="closeBtn" title="Cerrar">&times;</span></div>
+  <main class="tool-shell stats-shell">
+    <header class="tool-header stats-header">
+      <div>
+        <div class="tool-title">Analítica de sesiones</div>
+        <div class="stats-subtitle">Tus datos se procesan localmente en JustTimer.</div>
+      </div>
+      <div class="stats-header-actions">
+        <button class="tool-btn" id="exportBtn">Exportar JSON</button>
+        <button class="tool-btn view-btn active" id="statsTabBtn">Estadísticas</button>
+        <button class="tool-btn view-btn" id="tagsTabBtn">Etiquetas</button>
+      </div>
+    </header>
+
+    <section id="statsView" class="stats-view">
+      <div class="stats-periods" role="group" aria-label="Período">
+        <button class="tool-btn period-btn" data-period="day">Día</button>
+        <button class="tool-btn period-btn active" data-period="week">Semana</button>
+        <button class="tool-btn period-btn" data-period="month">Mes</button>
+        <button class="tool-btn period-btn" data-period="year">Año</button>
+        <button class="tool-btn period-btn" data-period="all">Todo</button>
+      </div>
+      <div class="stats-range" id="rangeLabel"></div>
+      <section class="stats-kpis" id="kpiGrid"></section>
+      <section class="stats-chart-grid">
+        <article class="stats-card stats-card-wide">
+          <div class="stats-card-title">Sesiones y tiempo de enfoque</div>
+          <div class="stats-card-subtitle">Cantidad de sesiones y horas por período</div>
+          <div class="stats-chart" id="volumeChart"></div>
+        </article>
+        <article class="stats-card">
+          <div class="stats-card-title">Horario de sesiones</div>
+          <div class="stats-card-subtitle">A qué hora empezaste</div>
+          <div class="stats-chart" id="hourChart"></div>
+        </article>
+        <article class="stats-card stats-card-wide">
+          <div class="stats-card-title">Energía promedio</div>
+          <div class="stats-card-subtitle">Sólo incluye sesiones con energía registrada</div>
+          <div class="stats-chart" id="energyChart"></div>
+        </article>
+      </section>
+      <section class="stats-energy-summary">
+        <div class="stats-card-title">Energía promedio por escala</div>
+        <div class="energy-scale-grid" id="energyScaleGrid"></div>
+      </section>
+      <section class="stats-energy-summary">
+        <div class="stats-card-title">Trabajo por proyecto</div>
+        <div class="stats-card-subtitle">Sesiones terminadas y horas de enfoque acumuladas.</div>
+        <div class="tag-list" id="projectStatsList"></div>
+      </section>
+    </section>
+
+    <section id="tagsView" class="tags-view hidden">
+      <div class="tags-intro">Las etiquetas se muestran por separado de las estadísticas para que puedas comparar en qué tipo de sesiones invertís tu tiempo.</div>
+      <section class="stats-card">
+        <div class="stats-card-title">Distribución por etiqueta</div>
+        <div class="stats-card-subtitle">Sesiones terminadas y horas acumuladas</div>
+        <div class="tag-list" id="tagList"></div>
+      </section>
+    </section>
+    <div class="stats-toast hidden" id="statsToast"></div>
+  </main>
+  <script src="stats.js"></script>
+</body>
+</html>

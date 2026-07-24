@@ -4,6 +4,7 @@ const SESSIONS_KEY = "justtimer.sessions.v1";
 const TASKS_KEY = "justtimer.tasks.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
 const SESSION_TYPES_KEY = "justtimer.sessionTypes.v1";
+const PROJECTS_KEY = "justtimer.projects.v1";
 const DEFAULT_DURATION_SECS = 50 * 60;
 
 const SKY_PHASES = [
@@ -88,6 +89,30 @@ function readSessionTypes() {
 function writeSessionTypes(types) {
   const clean = [...new Set(types.map(type => type.trim()).filter(Boolean))];
   localStorage.setItem(SESSION_TYPES_KEY, JSON.stringify(clean.length ? clean : ["trabajo"]));
+}
+
+function readProjects() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderProjectSelects(selectedId = "") {
+  const projects = readProjects().filter(project => !project.archived);
+  [$("sessionProjectSelect"), $("reviewProject")].filter(Boolean).forEach(select => {
+    const current = selectedId || select.value;
+    select.innerHTML = `<option value="">Sin proyecto</option>`;
+    projects.forEach(project => {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = project.title;
+      select.appendChild(option);
+    });
+    select.value = projects.some(project => project.id === current) ? current : "";
+  });
 }
 
 function writeActiveSession(value) {
@@ -392,11 +417,15 @@ function startSelectedNow() {
 
 function createRunningSession(startDt) {
   const sessions = readSessions();
+  const projectId = $("sessionProjectSelect")?.value || null;
+  const project = readProjects().find(item => item.id === projectId);
   const session = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     startAt: startDt.toISOString(),
     durationSecs,
     label: "",
+    projectId,
+    projectName: project?.title || null,
     status: "running",
     tasks: [],
     notes: "",
@@ -573,6 +602,8 @@ function buildEnergyButtons() {
 function openReviewPanel() {
   closeOpenBreak();
   renderSessionTypeSelect();
+  const current = readSessions().find(session => session.id === activePendingSessionId);
+  renderProjectSelects(current?.projectId || "");
   renderReviewTasks();
   $("reviewNotes").value = "";
   reviewEnergy = 5;
@@ -668,6 +699,8 @@ function finishSession({ skip = false } = {}) {
       completedAt: new Date().toISOString(),
       endedAt: new Date().toISOString(),
       label: skip ? "" : $("reviewType").value,
+      projectId: skip ? null : ($("reviewProject").value || null),
+      projectName: skip ? null : (readProjects().find(project => project.id === $("reviewProject").value)?.title || null),
       notes: skip ? "" : $("reviewNotes").value.trim(),
       energy: skip ? null : reviewEnergy,
       tasks: reviewedTasks,
@@ -814,9 +847,14 @@ function openHabits() {
   ipcRenderer.send("open-habits");
 }
 
+function openStats() {
+  ipcRenderer.send("open-stats");
+}
+
 $("calBtn").addEventListener("click", openCalendar);
 $("tasksSetupBtn").addEventListener("click", openTasks);
 $("habitsBtn").addEventListener("click", openHabits);
+$("statsBtn").addEventListener("click", openStats);
 $("calTimerBtn").addEventListener("click", openCalendar);
 $("tasksTimerBtn").addEventListener("click", openTasks);
 
@@ -831,7 +869,10 @@ $("pendingSessions").addEventListener("click", event => {
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-app"));
 
 ipcRenderer.on("sessions-updated", updateSessionSummary);
-window.addEventListener("focus", updateSessionSummary);
+window.addEventListener("focus", () => {
+  updateSessionSummary();
+  renderProjectSelects();
+});
 
 updateSkyGradient();
 setInterval(updateSkyGradient, 60_000);
@@ -841,6 +882,7 @@ setInterval(() => {
 }, 1000);
 
 buildQuarterButtons();
+renderProjectSelects();
 document.querySelector('.dur-btn[data-mins="50"]')?.classList.add("selected");
 updateSessionSummary();
 showPanel("panelSetup");
