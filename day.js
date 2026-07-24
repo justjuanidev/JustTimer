@@ -20,7 +20,11 @@ function id() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function esc(value) { return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
 
 function newTask(text) {
-  return { id: id(), text, done: false, notes: "", priority: "medium", deleted: false, category: $("newTaskCategory").value, dueDate: $("newTaskDue").value || null, mode, projectId, createdAt: new Date().toISOString() };
+  const selectedCategory = $("newTaskCategory").value;
+  // When the user is working inside a category, that view is the source of
+  // truth. This avoids silently sending every new task to Inbox.
+  const taskCategory = category === "all" ? selectedCategory : category;
+  return { id: id(), text, done: false, notes: "", priority: "medium", deleted: false, category: taskCategory, dueDate: $("newTaskDue").value || null, mode, projectId, createdAt: new Date().toISOString() };
 }
 
 function addTask() {
@@ -84,11 +88,17 @@ function renderProjects() {
 }
 
 function renderContext() { const context = $("projectContext"), project = projects().find(item => item.id === projectId); context.classList.toggle("hidden", !project); if (project) { const stats = projectSessionStats(project); context.innerHTML = `<strong>${esc(project.title)}</strong><span>${stats.sessions} sesiones · ${stats.hours.toFixed(1)} h enfocadas</span><button class="tool-btn" id="archiveProject">${project.archived ? "Restaurar" : "Archivar"}</button><button class="tool-btn danger" id="deleteProject">Borrar</button><button class="tool-btn" id="clearProject">Ver todas</button>`; } $("clearProject")?.addEventListener("click", () => { projectId = null; render(); }); $("archiveProject")?.addEventListener("click", () => { const target = projects().find(item => item.id === projectId); writeArray(PROJECTS_KEY, projects().map(item => item.id === projectId ? { ...item, archived: !target.archived, archivedAt: !target.archived ? new Date().toISOString() : null } : item)); projectId = null; render(); }); $("deleteProject")?.addEventListener("click", () => { const target = projects().find(item => item.id === projectId); if (!target || !window.confirm(`¿Borrar el proyecto “${target.title}”? Las sesiones existentes conservarán sus estadísticas históricas.`)) return; writeArray(PROJECTS_KEY, projects().filter(item => item.id !== projectId)); writeArray(DAY_TASKS_KEY, tasks().map(task => task.projectId === projectId ? { ...task, projectId: null } : task)); projectId = null; render(); }); }
-function render() { document.body.classList.toggle("day-work", mode === "work"); document.body.classList.toggle("day-personal", mode === "personal"); $("daySubtitle").textContent = mode === "work" ? "Modo trabajo · organizá tu día y proyectos" : "Modo personal · organizá tu día y proyectos"; document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === mode)); document.querySelectorAll(".day-filter").forEach(button => button.classList.toggle("active", button.dataset.category === category)); renderContext(); renderTasks(); renderProjects(); }
+function render() { document.body.classList.toggle("day-work", mode === "work"); document.body.classList.toggle("day-personal", mode === "personal"); $("daySubtitle").textContent = mode === "work" ? "Modo trabajo · organizá tu día y proyectos" : "Modo personal · organizá tu día y proyectos"; document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === mode)); document.querySelectorAll(".day-filter").forEach(button => button.classList.toggle("active", button.dataset.category === category)); if (category !== "all") $("newTaskCategory").value = category; renderContext(); renderTasks(); renderProjects(); }
 
 $("addTaskBtn").addEventListener("click", addTask); $("newTaskInput").addEventListener("keydown", event => { if (event.key === "Enter") addTask(); });
 document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { mode = button.dataset.mode; localStorage.setItem("justtimer.taskMode.v1", mode); projectId = null; render(); }));
-document.querySelectorAll(".day-filter").forEach(button => button.addEventListener("click", () => { category = button.dataset.category; render(); }));
+document.querySelectorAll(".day-filter").forEach(button => button.addEventListener("click", () => {
+  category = button.dataset.category;
+  // Adding a task from a filtered category should place it there by default,
+  // instead of silently sending every new task to Inbox.
+  if (category !== "all") $("newTaskCategory").value = category;
+  render();
+}));
 $("newProjectBtn").addEventListener("click", () => $("projectForm").classList.toggle("hidden"));
 $("archivedProjectsBtn").addEventListener("click", () => { showArchived = !showArchived; projectId = null; render(); });
 $("uploadProjectImageBtn").addEventListener("click", async () => { selectedProjectImage = await ipcRenderer.invoke("select-project-image"); if (selectedProjectImage) $("uploadProjectImageBtn").textContent = "Imagen elegida"; });
