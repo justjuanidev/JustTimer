@@ -5,6 +5,7 @@ const PROJECTS_KEY = "justtimer.projects.v1";
 const TASKS_KEY = "justtimer.tasks.v1";
 const SESSIONS_KEY = "justtimer.sessions.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
+const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 let mode = localStorage.getItem("justtimer.taskMode.v1") || "work";
 let category = "all";
 let projectId = null;
@@ -13,11 +14,37 @@ let selectedProjectImage = null;
 
 function $(id) { return document.getElementById(id); }
 function readArray(key) { try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value : []; } catch { return []; } }
-function writeArray(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+function writeArray(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+  if (key === DAY_TASKS_KEY) syncDueTasksToToday(value);
+  ipcRenderer.send("data-changed");
+}
 function tasks() { return readArray(DAY_TASKS_KEY); }
 function projects() { return readArray(PROJECTS_KEY); }
 function id() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function esc(value) { return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
+
+function todayKey(date = new Date()) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
+function readPriorityMap() { try { const value = JSON.parse(localStorage.getItem(DAILY_PRIORITIES_KEY) || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } }
+function syncDueTasksToToday(allTasks = tasks()) {
+  const date = todayKey(), map = readPriorityMap(), priorities = Array.isArray(map[date]) ? map[date] : [];
+  const byTask = new Map(priorities.filter(item => item.sourceDayTaskId).map(item => [item.sourceDayTaskId, item]));
+  const byId = new Map(priorities.map(item => [item.id, item]));
+  let taskChanged = false, priorityChanged = false;
+  allTasks.forEach(task => {
+    if (task.deleted || (task.dueDate !== date && task.dailyPriorityDate !== date)) return;
+    let record = (task.dailyPriorityId && byId.get(task.dailyPriorityId)) || byTask.get(task.id);
+    if (!record) {
+      record = { id: task.dailyPriorityId || `priority-${date}-${task.id}`, text: task.text, sourceDayTaskId: task.id, createdAt: new Date().toISOString() };
+      priorities.push(record); byId.set(record.id, record); priorityChanged = true;
+    }
+    if (record.text !== task.text || record.sourceDayTaskId !== task.id) { record.text = task.text; record.sourceDayTaskId = task.id; priorityChanged = true; }
+    if (task.dailyPriorityDate !== date || task.dailyPriorityId !== record.id) { task.dailyPriorityDate = date; task.dailyPriorityId = record.id; taskChanged = true; }
+  });
+  if (priorityChanged) { map[date] = priorities; localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(map)); }
+  if (taskChanged) localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(allTasks));
+  if (priorityChanged || taskChanged) ipcRenderer.send("data-changed");
+}
 
 function newTask(text) {
   const selectedCategory = $("newTaskCategory").value;
@@ -88,7 +115,7 @@ function renderProjects() {
 }
 
 function renderContext() { const context = $("projectContext"), project = projects().find(item => item.id === projectId); context.classList.toggle("hidden", !project); if (project) { const stats = projectSessionStats(project); context.innerHTML = `<strong>${esc(project.title)}</strong><span>${stats.sessions} sesiones · ${stats.hours.toFixed(1)} h enfocadas</span><button class="tool-btn" id="archiveProject">${project.archived ? "Restaurar" : "Archivar"}</button><button class="tool-btn danger" id="deleteProject">Borrar</button><button class="tool-btn" id="clearProject">Ver todas</button>`; } $("clearProject")?.addEventListener("click", () => { projectId = null; render(); }); $("archiveProject")?.addEventListener("click", () => { const target = projects().find(item => item.id === projectId); writeArray(PROJECTS_KEY, projects().map(item => item.id === projectId ? { ...item, archived: !target.archived, archivedAt: !target.archived ? new Date().toISOString() : null } : item)); projectId = null; render(); }); $("deleteProject")?.addEventListener("click", () => { const target = projects().find(item => item.id === projectId); if (!target || !window.confirm(`¿Borrar el proyecto “${target.title}”? Las sesiones existentes conservarán sus estadísticas históricas.`)) return; writeArray(PROJECTS_KEY, projects().filter(item => item.id !== projectId)); writeArray(DAY_TASKS_KEY, tasks().map(task => task.projectId === projectId ? { ...task, projectId: null } : task)); projectId = null; render(); }); }
-function render() { document.body.classList.toggle("day-work", mode === "work"); document.body.classList.toggle("day-personal", mode === "personal"); $("daySubtitle").textContent = mode === "work" ? "Modo trabajo · organizá tu día y proyectos" : "Modo personal · organizá tu día y proyectos"; document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === mode)); document.querySelectorAll(".day-filter").forEach(button => button.classList.toggle("active", button.dataset.category === category)); if (category !== "all") $("newTaskCategory").value = category; renderContext(); renderTasks(); renderProjects(); }
+function render() { syncDueTasksToToday(); document.body.classList.toggle("day-work", mode === "work"); document.body.classList.toggle("day-personal", mode === "personal"); $("daySubtitle").textContent = mode === "work" ? "Modo trabajo · organizá tus tareas y proyectos" : "Modo personal · organizá tus tareas y proyectos"; document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === mode)); document.querySelectorAll(".day-filter").forEach(button => button.classList.toggle("active", button.dataset.category === category)); if (category !== "all") $("newTaskCategory").value = category; renderContext(); renderTasks(); renderProjects(); }
 
 $("addTaskBtn").addEventListener("click", addTask); $("newTaskInput").addEventListener("keydown", event => { if (event.key === "Enter") addTask(); });
 document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { mode = button.dataset.mode; localStorage.setItem("justtimer.taskMode.v1", mode); projectId = null; render(); }));

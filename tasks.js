@@ -4,6 +4,7 @@ const SESSIONS_KEY = "justtimer.sessions.v1";
 const TASKS_KEY = "justtimer.tasks.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
+const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 
 let activeNoteTaskId = null;
 let activeNoteScope = "session"; // "session" | "day"
@@ -52,16 +53,72 @@ function readDayTasks() {
 
 function writeDayTasks(tasks) {
   localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(tasks));
+  syncDailyPriorityRecords(tasks);
+  ipcRenderer.send("data-changed");
+}
+
+function todayKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function readDailyPriorityMap() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DAILY_PRIORITIES_KEY) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+function isTodayPriorityTask(task) {
+  const today = todayKey();
+  return !task.deleted && (task.dailyPriorityDate === today || task.dueDate === today);
+}
+
+function syncDailyPriorityRecords(allTasks = readDayTasks()) {
+  const date = todayKey();
+  const map = readDailyPriorityMap();
+  const existing = Array.isArray(map[date]) ? map[date] : [];
+  const byTaskId = new Map(existing.filter(item => item.sourceDayTaskId).map(item => [item.sourceDayTaskId, item]));
+  const byPriorityId = new Map(existing.map(item => [item.id, item]));
+  let changedTasks = false;
+
+  allTasks.forEach(task => {
+    if (!isTodayPriorityTask(task)) return;
+    let priorityId = task.dailyPriorityId;
+    let record = (priorityId && byPriorityId.get(priorityId)) || byTaskId.get(task.id);
+    if (!record) {
+      priorityId = priorityId || `priority-${date}-${task.id}`;
+      record = { id: priorityId, text: task.text, sourceDayTaskId: task.id, createdAt: new Date().toISOString() };
+      existing.push(record);
+      byPriorityId.set(priorityId, record);
+    } else {
+      record.text = task.text;
+      record.sourceDayTaskId = task.id;
+    }
+    if (task.dailyPriorityDate !== date || task.dailyPriorityId !== record.id) {
+      task.dailyPriorityDate = date;
+      task.dailyPriorityId = record.id;
+      changedTasks = true;
+    }
+  });
+
+  map[date] = existing;
+  localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(map));
+  if (changedTasks) localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(allTasks));
+  return allTasks;
 }
 
 // Generic accessors so the rest of the file can work with "the active scope"
 // instead of branching everywhere.
 function readScope(scope) {
-  return scope === "day" ? readDayTasks() : readTasks();
+  if (scope !== "day") return readTasks();
+  return syncDailyPriorityRecords(readDayTasks()).filter(isTodayPriorityTask);
 }
 
 function writeScope(scope, tasks) {
-  if (scope === "day") writeDayTasks(tasks);
+  if (scope === "day") {
+    const updates = new Map(tasks.map(task => [task.id, task]));
+    writeDayTasks(readDayTasks().map(task => updates.get(task.id) || task));
+  }
   else writeTasks(tasks);
 }
 
@@ -118,13 +175,32 @@ function makeTask(text) {
   };
 }
 
+function makeTodayPriorityTask(text) {
+  const date = todayKey();
+  return {
+    ...makeTask(text),
+    priority: "high",
+    category: "actionable",
+    dueDate: date,
+    mode: "work",
+    projectId: null,
+    dailyPriorityDate: date,
+  };
+}
+
 function addTask() {
   const text = $("taskInput").value.trim();
   if (!text) return;
 
-  const tasks = readScope(activeView);
-  tasks.push(makeTask(text));
-  writeScope(activeView, tasks);
+  if (activeView === "day") {
+    const tasks = readDayTasks();
+    tasks.push(makeTodayPriorityTask(text));
+    writeDayTasks(tasks);
+  } else {
+    const tasks = readTasks();
+    tasks.push(makeTask(text));
+    writeTasks(tasks);
+  }
 
   $("taskInput").value = "";
   renderAll();
@@ -176,6 +252,7 @@ function setView(view) {
   activeView = view;
   $("tabSession").classList.toggle("active", view === "session");
   $("tabDay").classList.toggle("active", view === "day");
+  $("tabTasks").classList.remove("active");
   $("viewSession").classList.toggle("hidden", view !== "session");
   $("viewDay").classList.toggle("hidden", view !== "day");
   $("taskInput").placeholder = view === "day" ? "Nueva tarea del dia" : "Nueva tarea";
@@ -190,7 +267,7 @@ function renderAll() {
   renderTaskList({
     listEl: $("dayTaskList"),
     scope: "day",
-    emptyText: "Sin tareas del dia todavia",
+    emptyText: "No hay prioridades para hoy",
   });
 }
 
@@ -418,7 +495,11 @@ $("taskNotesInput").addEventListener("keydown", event => {
 });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 $("tabSession").addEventListener("click", () => setView("session"));
-$("tabDay").addEventListener("click", () => ipcRenderer.send("open-day-tasks"));
+$("tabDay").addEventListener("click", () => setView("day"));
+$("tabTasks").addEventListener("click", () => {
+  $("tabTasks").classList.add("active");
+  ipcRenderer.send("open-day-tasks");
+});
 
 setView("session");
 renderAll();
