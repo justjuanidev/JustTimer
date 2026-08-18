@@ -5,6 +5,8 @@ const TASKS_KEY = "justtimer.tasks.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
 const SESSION_TYPES_KEY = "justtimer.sessionTypes.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
+const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
+const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 const DEFAULT_DURATION_SECS = 50 * 60;
 
 const SKY_PHASES = [
@@ -62,6 +64,7 @@ function readSessions() {
 
 function writeSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  ipcRenderer.send("data-changed");
 }
 
 function readTasks() {
@@ -75,6 +78,110 @@ function readTasks() {
 
 function writeTasks(tasks) {
   localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+  ipcRenderer.send("data-changed");
+}
+
+function todayKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function readJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch { return fallback; }
+}
+
+function readDailyPriorities() {
+  const value = readJson(DAILY_PRIORITIES_KEY, {});
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function prioritiesForToday() {
+  const items = readDailyPriorities()[todayKey()];
+  return Array.isArray(items) ? items.filter(item => item && String(item.text || "").trim()) : [];
+}
+
+function hasDailyPriorities() {
+  return prioritiesForToday().length >= 3;
+}
+
+function addDailyPriorityInput(value = "") {
+  const row = document.createElement("div");
+  row.className = "daily-priority-row";
+  row.innerHTML = `<span class="daily-priority-number"></span><input class="daily-priority-input" maxlength="180" placeholder="Tarea prioritaria" /><button class="daily-priority-remove" type="button" title="Quitar">&times;</button>`;
+  row.querySelector("input").value = value;
+  row.querySelector(".daily-priority-remove").addEventListener("click", () => {
+    if ($("dailyPriorityList").children.length <= 3) return;
+    row.remove();
+    renumberDailyPriorities();
+    resizeWindow();
+  });
+  $("dailyPriorityList").appendChild(row);
+  renumberDailyPriorities();
+}
+
+function renumberDailyPriorities() {
+  [...$("dailyPriorityList").children].forEach((row, index) => {
+    row.querySelector(".daily-priority-number").textContent = String(index + 1);
+  });
+}
+
+function showDailyPrioritiesPanel() {
+  $("dailyPriorityList").innerHTML = "";
+  const existing = prioritiesForToday();
+  (existing.length ? existing : [{ text: "" }, { text: "" }, { text: "" }]).forEach(item => addDailyPriorityInput(item.text));
+  while ($("dailyPriorityList").children.length < 3) addDailyPriorityInput();
+  showPanel("panelDailyPriorities");
+  $("dailyPriorityList").querySelector("input")?.focus();
+}
+
+function requireDailyPriorities() {
+  if (hasDailyPriorities()) return true;
+  showDailyPrioritiesPanel();
+  return false;
+}
+
+function saveDailyPriorities() {
+  const texts = [...document.querySelectorAll(".daily-priority-input")].map(input => input.value.trim()).filter(Boolean);
+  if (texts.length < 3) {
+    $("dailyPriorityError").textContent = "Completá al menos 3 tareas prioritarias.";
+    $("dailyPriorityError").classList.remove("hidden");
+    resizeWindow();
+    return;
+  }
+  const date = todayKey();
+  const existingPlan = readDailyPriorities();
+  const priorItems = Array.isArray(existingPlan[date]) ? existingPlan[date] : [];
+  const items = texts.map((text, index) => ({
+    id: priorItems[index]?.id || `priority-${date}-${Date.now()}-${index}`,
+    text,
+    createdAt: priorItems[index]?.createdAt || new Date().toISOString(),
+  }));
+  localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify({ ...existingPlan, [date]: items }));
+
+  const dayTasks = readJson(DAY_TASKS_KEY, []);
+  const safeDayTasks = Array.isArray(dayTasks) ? dayTasks : [];
+  const existingIds = new Set(safeDayTasks.map(task => task.dailyPriorityId).filter(Boolean));
+  items.forEach(item => {
+    if (existingIds.has(item.id)) return;
+    safeDayTasks.push({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      text: item.text,
+      done: false,
+      notes: "",
+      priority: "high",
+      deleted: false,
+      category: "actionable",
+      dueDate: date,
+      mode: "work",
+      projectId: null,
+      dailyPriorityId: item.id,
+      dailyPriorityDate: date,
+      createdAt: new Date().toISOString(),
+    });
+  });
+  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(safeDayTasks));
+  ipcRenderer.send("data-changed");
+  $("dailyPriorityError").classList.add("hidden");
+  showPanel("panelSetup");
 }
 
 function readSessionTypes() {
@@ -89,6 +196,7 @@ function readSessionTypes() {
 function writeSessionTypes(types) {
   const clean = [...new Set(types.map(type => type.trim()).filter(Boolean))];
   localStorage.setItem(SESSION_TYPES_KEY, JSON.stringify(clean.length ? clean : ["trabajo"]));
+  ipcRenderer.send("data-changed");
 }
 
 function readProjects() {
@@ -284,11 +392,11 @@ function initResizeObserver() {
   const ro = new ResizeObserver(() => {
     requestAnimationFrame(() => requestAnimationFrame(sendHeight));
   });
-  ["panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(id => ro.observe($(id)));
+  ["panelDailyPriorities", "panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(id => ro.observe($(id)));
 }
 
 function showPanel(id) {
-  ["panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(panelId => {
+  ["panelDailyPriorities", "panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(panelId => {
     $(panelId).classList.toggle("hidden", panelId !== id);
   });
   resizeWindow();
@@ -399,6 +507,7 @@ function autoStartPendingSessions() {
 
   const due = getPendingSessions().find(session => new Date(session.startAt) <= new Date());
   if (!due) return;
+  if (!requireDailyPriorities()) return;
 
   activePendingSessionId = due.id;
   updateSession(due.id, { status: "running" });
@@ -408,6 +517,7 @@ function autoStartPendingSessions() {
 }
 
 function startSelectedNow() {
+  if (!requireDailyPriorities()) return;
   if (!durationSecs) {
     showError("Primero elegi la duracion");
     return;
@@ -458,6 +568,7 @@ function markSessionRunning() {
 }
 
 function schedule(startDt) {
+  if (!requireDailyPriorities()) return;
   if (!durationSecs) {
     showError("Primero elegi la duracion");
     return;
@@ -749,6 +860,21 @@ $("customDurInput").addEventListener("keydown", event => {
 });
 
 $("startNowBtn").addEventListener("click", startSelectedNow);
+$("addDailyPriorityBtn").addEventListener("click", () => {
+  addDailyPriorityInput();
+  resizeWindow();
+  $("dailyPriorityList").lastElementChild?.querySelector("input")?.focus();
+});
+$("saveDailyPrioritiesBtn").addEventListener("click", saveDailyPriorities);
+
+async function setStartupSetting(enabled) {
+  const result = await ipcRenderer.invoke("set-startup-setting", enabled);
+  [$("startupDailyCheck"), $("startupSetupCheck")].forEach(input => { input.checked = Boolean(result?.enabled); });
+}
+
+[$("startupDailyCheck"), $("startupSetupCheck")].forEach(input => {
+  input.addEventListener("change", () => setStartupSetting(input.checked));
+});
 
 $("waitCancelBtn").addEventListener("click", () => {
   waiting = false;
@@ -885,5 +1011,18 @@ buildQuarterButtons();
 renderProjectSelects();
 document.querySelector('.dur-btn[data-mins="50"]')?.classList.add("selected");
 updateSessionSummary();
-showPanel("panelSetup");
 initResizeObserver();
+
+async function initializeApp() {
+  try {
+    const enabled = await ipcRenderer.invoke("get-startup-setting");
+    [$("startupDailyCheck"), $("startupSetupCheck")].forEach(input => { input.checked = Boolean(enabled); });
+  } catch {
+    // The setting remains available if the operating system query fails later.
+  }
+  if (hasDailyPriorities()) showPanel("panelSetup");
+  else showDailyPrioritiesPanel();
+  ipcRenderer.send("data-changed");
+}
+
+initializeApp();

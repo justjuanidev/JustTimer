@@ -2,6 +2,12 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { autoUpdater } = require("electron-updater");
+const DATA_SCHEMA_VERSION = 1;
+const DATA_ROOT = path.join(app.getPath("appData"), "JustTimerData");
+const STABLE_USER_DATA = path.join(DATA_ROOT, "User Data");
+const BACKUP_ROOT = path.join(DATA_ROOT, "Backups");
+const SNAPSHOT_ROOT = path.join(DATA_ROOT, "Snapshots");
+const LEGACY_USER_DATA = app.getPath("userData");
 const log = {
   info: (...args) => {
     try { fs.appendFileSync(path.join(app.getPath('userData'), 'updater.log'), '[INFO] ' + args.join(' ') + '\n'); } catch (e) {}
@@ -34,15 +40,34 @@ function canUseDirectory(dir) {
   }
 }
 
+function directoryHasFiles(dir) {
+  try { return fs.existsSync(dir) && fs.readdirSync(dir).length > 0; } catch { return false; }
+}
+
+function safeStamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
 function copyUserDataIfNeeded(fromDir, toDir) {
   try {
     if (!fromDir || fromDir === toDir || !fs.existsSync(fromDir)) return;
-    const targetHasData = fs.existsSync(toDir) && fs.readdirSync(toDir).length > 0;
+    const targetHasData = directoryHasFiles(toDir);
     if (targetHasData) return;
+    fs.mkdirSync(BACKUP_ROOT, { recursive: true });
+    const migrationBackup = path.join(BACKUP_ROOT, `pre-migration-${safeStamp()}`);
+    fs.cpSync(fromDir, migrationBackup, { recursive: true, force: false, errorOnExist: true });
     fs.mkdirSync(toDir, { recursive: true });
     fs.cpSync(fromDir, toDir, { recursive: true, force: false, errorOnExist: false });
+    if (!directoryHasFiles(toDir)) throw new Error("The migrated data directory is empty");
+    fs.writeFileSync(path.join(DATA_ROOT, "migration.json"), JSON.stringify({
+      schemaVersion: DATA_SCHEMA_VERSION,
+      migratedAt: new Date().toISOString(),
+      from: fromDir,
+      to: toDir,
+      backup: migrationBackup,
+    }, null, 2));
   } catch (error) {
-    console.warn("User data migration skipped:", error);
+    console.warn("User data migration skipped; legacy data remains untouched:", error);
   }
 }
 
@@ -52,18 +77,50 @@ function configureUserDataPath() {
     return;
   }
 
-  // Keep data in Electron's stable user profile directory.  Previous builds
-  // placed it beside the executable, which can be removed by an installer
-  // update.  Only copy a legacy folder into an empty profile; never replace
-  // data that is already there.
-  const defaultUserData = app.getPath("userData");
+  // Program files live under Local/Programs and may be replaced by an update.
+  // Persistent data lives under Roaming/JustTimerData and is never an installer
+  // target. Migration is copy-only and starts with a complete backup.
   const exeDir = path.dirname(app.getPath("exe"));
-  const legacyUserData = path.join(exeDir, "JustTimer-data");
+  const besideExeData = path.join(exeDir, "JustTimer-data");
 
-  if (fs.existsSync(legacyUserData)) copyUserDataIfNeeded(legacyUserData, defaultUserData);
+  if (!directoryHasFiles(STABLE_USER_DATA)) {
+    if (directoryHasFiles(LEGACY_USER_DATA)) copyUserDataIfNeeded(LEGACY_USER_DATA, STABLE_USER_DATA);
+    else if (directoryHasFiles(besideExeData)) copyUserDataIfNeeded(besideExeData, STABLE_USER_DATA);
+  }
+  fs.mkdirSync(STABLE_USER_DATA, { recursive: true });
+  app.setPath("userData", STABLE_USER_DATA);
+}
+
+function backupBeforeNewVersion() {
+  if (!app.isPackaged || !directoryHasFiles(STABLE_USER_DATA)) return;
+  try {
+    fs.mkdirSync(BACKUP_ROOT, { recursive: true });
+    const markerPath = path.join(DATA_ROOT, "last-version.txt");
+    const previousVersion = fs.existsSync(markerPath) ? fs.readFileSync(markerPath, "utf8").trim() : "";
+    const currentVersion = app.getVersion();
+    if (previousVersion === currentVersion) return;
+    const target = path.join(BACKUP_ROOT, `before-${currentVersion}-${safeStamp()}`);
+    fs.mkdirSync(target, { recursive: true });
+    for (const name of ["Local Storage", "Preferences"]) {
+      const source = path.join(STABLE_USER_DATA, name);
+      if (fs.existsSync(source)) fs.cpSync(source, path.join(target, name), { recursive: true, force: false });
+    }
+    const snapshot = path.join(SNAPSHOT_ROOT, "current.json");
+    if (fs.existsSync(snapshot)) fs.copyFileSync(snapshot, path.join(target, "data-snapshot.json"));
+    fs.writeFileSync(path.join(target, "backup.json"), JSON.stringify({
+      schemaVersion: DATA_SCHEMA_VERSION,
+      createdAt: new Date().toISOString(),
+      previousVersion: previousVersion || null,
+      nextVersion: currentVersion,
+    }, null, 2));
+    fs.writeFileSync(markerPath, currentVersion, "utf8");
+  } catch (error) {
+    console.warn("Pre-update backup failed; existing data remains untouched:", error);
+  }
 }
 
 configureUserDataPath();
+backupBeforeNewVersion();
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("disable-gpu-compositing");
@@ -71,6 +128,40 @@ app.commandLine.appendSwitch("in-process-gpu");
 
 let mainWindow;
 const childWindows = new Map();
+let lastSnapshotStorage = "";
+
+function writeDataSnapshot(storage) {
+  if (!storage || typeof storage !== "object" || Array.isArray(storage)) return;
+  const justTimerStorage = Object.fromEntries(Object.entries(storage).filter(([key]) => key.startsWith("justtimer.")));
+  const document = {
+    schemaVersion: DATA_SCHEMA_VERSION,
+    appVersion: app.getVersion(),
+    savedAt: new Date().toISOString(),
+    storage: justTimerStorage,
+  };
+  const storageJson = JSON.stringify(justTimerStorage);
+  if (storageJson === lastSnapshotStorage) return;
+  const json = JSON.stringify(document, null, 2);
+  fs.mkdirSync(SNAPSHOT_ROOT, { recursive: true });
+  const currentPath = path.join(SNAPSHOT_ROOT, "current.json");
+  const temporaryPath = `${currentPath}.tmp`;
+  fs.writeFileSync(temporaryPath, json, "utf8");
+  fs.renameSync(temporaryPath, currentPath);
+  lastSnapshotStorage = storageJson;
+}
+
+async function captureSnapshotFromWindow(target = mainWindow) {
+  if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+  try {
+    const storage = await target.webContents.executeJavaScript(
+      `Object.fromEntries(Array.from({length: localStorage.length}, (_, i) => { const key = localStorage.key(i); return [key, localStorage.getItem(key)]; }))`,
+      true,
+    );
+    writeDataSnapshot(storage);
+  } catch (error) {
+    log.warn("Data snapshot skipped:", error.message);
+  }
+}
 
 const sharedWindowOptions = {
   frame: false,
@@ -94,6 +185,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile("index.html");
+  mainWindow.webContents.on("did-finish-load", () => captureSnapshotFromWindow(mainWindow));
 }
 
 function openChildWindow(key, file, options) {
@@ -110,12 +202,14 @@ function openChildWindow(key, file, options) {
   });
 
   child.on("closed", () => childWindows.delete(key));
+  child.on("close", () => captureSnapshotFromWindow(child));
   child.loadFile(path.join(__dirname, file));
   childWindows.set(key, child);
 }
 
 app.whenReady().then(() => {
   createWindow();
+  setInterval(() => captureSnapshotFromWindow(mainWindow), 5 * 60 * 1000).unref();
   // Initialize auto-updater after window is ready
   try {
     initAutoUpdater();
@@ -155,6 +249,22 @@ ipcMain.on("open-day-tasks", () => {
   openChildWindow("day-tasks", "day.html", { width: 1020, height: 720, resizable: true });
 });
 
+ipcMain.handle("get-startup-setting", () => app.getLoginItemSettings().openAtLogin);
+
+ipcMain.handle("set-startup-setting", (_event, enabled) => {
+  if (process.platform !== "win32") return { enabled: false, supported: false };
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(enabled),
+    path: app.getPath("exe"),
+    args: [],
+  });
+  return { enabled: app.getLoginItemSettings().openAtLogin, supported: true };
+});
+
+ipcMain.on("data-changed", event => {
+  captureSnapshotFromWindow(BrowserWindow.fromWebContents(event.sender) || mainWindow);
+});
+
 ipcMain.handle("select-project-image", async event => {
   const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   const result = await dialog.showOpenDialog(owner, {
@@ -177,6 +287,7 @@ ipcMain.on("open-stats", () => {
 });
 
 ipcMain.on("session-created", () => {
+  captureSnapshotFromWindow(mainWindow);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("sessions-updated");
   }

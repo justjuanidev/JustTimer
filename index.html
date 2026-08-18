@@ -11,6 +11,19 @@
     <span class="close-btn" id="closeBtn" title="Cerrar">&times;</span>
   </div>
 
+  <div class="panel hidden" id="panelDailyPriorities">
+    <div class="daily-priority-title">Tus prioridades de hoy</div>
+    <div class="daily-priority-help">Antes de iniciar sesiones, anotá al menos 3 tareas importantes. Podés agregar todas las que necesites.</div>
+    <div class="daily-priority-list" id="dailyPriorityList"></div>
+    <button class="daily-add-btn" id="addDailyPriorityBtn" type="button">+ agregar otra</button>
+    <div class="error-msg hidden" id="dailyPriorityError"></div>
+    <label class="startup-setting">
+      <input type="checkbox" id="startupDailyCheck" />
+      <span>Abrir JustTimer al iniciar Windows</span>
+    </label>
+    <button class="start-session-btn" id="saveDailyPrioritiesBtn" type="button">GUARDAR PRIORIDADES</button>
+  </div>
+
   <div class="panel" id="panelSetup">
     <div class="section-label">&iquest;De cu&aacute;nto es la sesi&oacute;n?</div>
     <div class="btn-row" id="durRow">
@@ -39,6 +52,11 @@
     <div class="pending-sessions hidden" id="pendingSessions"></div>
 
     <div class="error-msg hidden" id="errorMsg"></div>
+
+    <label class="startup-setting setup-startup-setting">
+      <input type="checkbox" id="startupSetupCheck" />
+      <span>Abrir al iniciar Windows</span>
+    </label>
 
     <div class="bottom-row">
       <button class="icon-btn" id="calBtn" title="Calendario">

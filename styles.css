@@ -140,6 +140,80 @@ body.main-window .close-btn {
   text-shadow: 0 1px 6px rgba(0,0,0,0.16);
 }
 
+#panelDailyPriorities {
+  gap: 9px;
+}
+
+.daily-priority-title {
+  text-align: center;
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.daily-priority-help {
+  color: var(--white-dim);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.daily-priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.daily-priority-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 25px;
+  gap: 5px;
+  align-items: center;
+}
+
+.daily-priority-number {
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  color: var(--white-dim);
+}
+
+.daily-priority-input {
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  color: white;
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.2);
+  font-size: 12px;
+}
+
+.daily-priority-input::placeholder { color: rgba(255,255,255,0.5); }
+
+.daily-priority-remove,
+.daily-add-btn {
+  color: white;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 8px;
+}
+
+.daily-priority-remove { width: 25px; height: 27px; }
+.daily-add-btn { padding: 6px; font-size: 12px; font-weight: 700; }
+
+.startup-setting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--white-dim);
+  font-size: 11px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.startup-setting input { accent-color: var(--accent); }
+.setup-startup-setting { margin-top: -2px; }
+
 .btn-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
