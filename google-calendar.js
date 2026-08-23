@@ -29,19 +29,21 @@ class GoogleCalendar {
   }
 
   status() {
-    return { configured: Boolean(this.state.clientId), connected: Boolean(this.state.refreshToken), email: this.state.email || "" };
+    return { configured: Boolean(this.state.clientId && this.state.clientSecret), connected: Boolean(this.state.refreshToken), email: this.state.email || "" };
   }
 
-  configure(clientId) {
-    const cleaned = String(clientId || "").trim();
-    if (!cleaned.endsWith(".apps.googleusercontent.com")) throw new Error("El Client ID de Google no es valido");
-    if (cleaned !== this.state.clientId) this.state = { clientId: cleaned };
+  configure(credentials = {}) {
+    const clientId = String(credentials.clientId || "").trim();
+    const clientSecret = String(credentials.clientSecret || "").trim();
+    if (!clientId.endsWith(".apps.googleusercontent.com")) throw new Error("El Client ID de Google no es valido");
+    if (!clientSecret) throw new Error("Falta el Client secret de Google");
+    if (clientId !== this.state.clientId || clientSecret !== this.state.clientSecret) this.state = { clientId, clientSecret };
     this.save();
     return this.status();
   }
 
   async connect() {
-    if (!this.state.clientId) throw new Error("Primero pega tu Client ID de Google");
+    if (!this.state.clientId || !this.state.clientSecret) throw new Error("Primero guarda el Client ID y el Client secret de Google");
     const verifier = base64url(crypto.randomBytes(48));
     const challenge = base64url(crypto.createHash("sha256").update(verifier).digest());
     const authResult = await new Promise((resolve, reject) => {
@@ -61,7 +63,7 @@ class GoogleCalendar {
       });
       setTimeout(() => { server.close(); reject(new Error("Se agoto el tiempo para conectar Google")); }, 180000).unref();
     });
-    const token = await requestJson("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: this.state.clientId, code: authResult.code, code_verifier: verifier, grant_type: "authorization_code", redirect_uri: authResult.redirectUri }) });
+    const token = await requestJson("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: this.state.clientId, client_secret: this.state.clientSecret, code: authResult.code, code_verifier: verifier, grant_type: "authorization_code", redirect_uri: authResult.redirectUri }) });
     this.state.refreshToken = token.refresh_token;
     this.state.accessToken = token.access_token;
     this.state.expiresAt = Date.now() + token.expires_in * 1000;
@@ -72,7 +74,7 @@ class GoogleCalendar {
   async accessToken() {
     if (this.state.accessToken && this.state.expiresAt > Date.now() + 60000) return this.state.accessToken;
     if (!this.state.refreshToken) throw new Error("Google Calendar no esta conectado");
-    const token = await requestJson("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: this.state.clientId, refresh_token: this.state.refreshToken, grant_type: "refresh_token" }) });
+    const token = await requestJson("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: this.state.clientId, client_secret: this.state.clientSecret, refresh_token: this.state.refreshToken, grant_type: "refresh_token" }) });
     this.state.accessToken = token.access_token;
     this.state.expiresAt = Date.now() + token.expires_in * 1000;
     this.save();
@@ -86,7 +88,7 @@ class GoogleCalendar {
     return (data.items || []).filter(event => event.status !== "cancelled" && /focusmate/i.test(`${event.summary || ""} ${event.description || ""}`)).map(event => ({ id: event.id, title: event.summary || "Focusmate", startAt: event.start?.dateTime, endAt: event.end?.dateTime, htmlLink: event.htmlLink })).filter(event => event.startAt && event.endAt);
   }
 
-  disconnect() { this.state = { clientId: this.state.clientId }; this.save(); return this.status(); }
+  disconnect() { this.state = { clientId: this.state.clientId, clientSecret: this.state.clientSecret }; this.save(); return this.status(); }
 }
 
 module.exports = GoogleCalendar;

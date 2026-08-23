@@ -54,12 +54,13 @@
     <div class="error-msg hidden" id="calendarMsg"></div>
   </main>
 
-  <dialog class="habit-dialog" id="googleDialog">
+  <dialog class="habit-dialog google-calendar-dialog" id="googleDialog">
     <form class="habit-form" method="dialog">
       <div class="review-title">Google Calendar + Focusmate</div>
-      <div class="side-copy">Pega el Client ID de una aplicacion de escritorio creada en Google Cloud. JustTimer solo solicita permiso de lectura.</div>
+      <div class="side-copy">Pega el Client ID y el Client secret de una aplicacion de escritorio creada en Google Cloud. JustTimer solo solicita permiso de lectura.</div>
       <input class="tool-input" id="googleClientId" placeholder="...apps.googleusercontent.com" />
-      <div class="note-actions"><button class="tool-btn" id="saveGoogleClientBtn" type="button">Guardar</button><button class="tool-btn primary" id="connectGoogleBtn" type="button">Conectar</button><button class="tool-btn" id="syncGoogleBtn" type="button">Sincronizar</button><button class="tool-btn" value="cancel">Cerrar</button></div>
+      <input class="tool-input" id="googleClientSecret" type="password" placeholder="Client secret" />
+      <div class="note-actions google-calendar-actions"><button class="tool-btn" id="saveGoogleClientBtn" type="button">Guardar datos</button><button class="tool-btn primary" id="connectGoogleBtn" type="button">Conectar</button><button class="tool-btn" id="syncGoogleBtn" type="button">Sincronizar</button><button class="tool-btn" value="cancel">Cerrar</button></div>
       <div class="selected-info" id="googleStatus"></div>
     </form>
   </dialog>

@@ -623,7 +623,7 @@ $("nextWeekBtn").addEventListener("click", () => moveRange(1));
 $("todayBtn").addEventListener("click", goToday);
 $("registerModeBtn").addEventListener("click", toggleRegisterMode);
 $("googleCalendarBtn").addEventListener("click", () => { $("googleDialog").showModal(); refreshGoogleStatus(); });
-$("saveGoogleClientBtn").addEventListener("click", async () => { try { await ipcRenderer.invoke("google-calendar-configure", $("googleClientId").value); await refreshGoogleStatus(); } catch (error) { $("googleStatus").textContent = error.message; } });
+$("saveGoogleClientBtn").addEventListener("click", async () => { try { await ipcRenderer.invoke("google-calendar-configure", { clientId: $("googleClientId").value, clientSecret: $("googleClientSecret").value }); await refreshGoogleStatus(); } catch (error) { $("googleStatus").textContent = error.message; } });
 $("connectGoogleBtn").addEventListener("click", async () => { try { $("googleStatus").textContent = "Abriendo Google..."; await ipcRenderer.invoke("google-calendar-connect"); await refreshGoogleStatus(); await syncGoogleCalendar(); } catch (error) { $("googleStatus").textContent = error.message; } });
 $("syncGoogleBtn").addEventListener("click", () => syncGoogleCalendar());
 $("weekViewBtn").addEventListener("click", () => setVisibleDays(7));

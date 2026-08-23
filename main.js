@@ -281,7 +281,7 @@ ipcMain.handle("request-app-close", async (_event, pendingHabits = []) => {
 });
 
 ipcMain.handle("google-calendar-status", () => googleCalendar.status());
-ipcMain.handle("google-calendar-configure", (_event, clientId) => googleCalendar.configure(clientId));
+ipcMain.handle("google-calendar-configure", (_event, credentials) => googleCalendar.configure(credentials));
 ipcMain.handle("google-calendar-connect", () => googleCalendar.connect());
 ipcMain.handle("google-calendar-disconnect", () => googleCalendar.disconnect());
 ipcMain.handle("google-calendar-sync", (_event, range) => googleCalendar.events(range.timeMin, range.timeMax));
