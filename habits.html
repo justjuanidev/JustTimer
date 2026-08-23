@@ -59,6 +59,9 @@
         <option value="night">Noche</option>
       </select>
       <input class="tool-input" id="habitTargetInput" type="number" min="1" max="20" value="1" placeholder="Veces por dia" />
+      <label class="review-label" for="habitReminderTimes">Recordatorios (varias horas, separadas por coma)</label>
+      <input class="tool-input" id="habitReminderTimes" placeholder="08:00, 11:30, 18:00" />
+      <label class="habit-day"><input type="checkbox" id="habitPhaseEndReminder" checked /><span>Avisar 15 min antes de cambiar de etapa</span></label>
       <div class="habit-days" id="habitDays"></div>
       <div class="note-actions">
         <button class="tool-btn primary" type="submit">Guardar</button>

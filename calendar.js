@@ -5,6 +5,7 @@ const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
 const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 const SLOT_HEIGHT = 28;
+const GOOGLE_SYNC_KEY = "justtimer.googleCalendarSync.v1";
 
 let weekStart = startOfWeek(new Date());
 let selectedStart = null;
@@ -29,6 +30,41 @@ function readSessions() {
 
 function writeSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+}
+
+function focusmateMinutesForDay(day, sessions = readSessions()) {
+  return sessions.filter(session => session.status !== "cancelled" && session.source === "google-focusmate" && sameDayKey(session.startAt, dateKey(day))).reduce((sum, session) => sum + Math.round((Number(session.durationSecs) || 0) / 60), 0);
+}
+
+function renderFocusmateGoal() {
+  const box = $("focusmateGoal"), today = new Date();
+  if ([0, 6].includes(today.getDay())) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  const booked = focusmateMinutesForDay(today), target = 225, missing = Math.max(0, target - booked);
+  box.innerHTML = `<strong>Sesiones pendientes</strong><span>${booked} / ${target} min reservados hoy</span><span>${missing ? `Faltan ${missing} min` : "Objetivo del dia completo"}</span>`;
+  box.classList.toggle("complete", missing === 0);
+}
+
+async function syncGoogleCalendar(showFeedback = true) {
+  const rangeStart = addDays(startOfWeek(new Date()), -28), rangeEnd = addDays(rangeStart, 120);
+  try {
+    const events = await ipcRenderer.invoke("google-calendar-sync", { timeMin: rangeStart.toISOString(), timeMax: rangeEnd.toISOString() });
+    const eventIds = new Set(events.map(event => event.id));
+    const sessions = readSessions().filter(session => session.source !== "google-focusmate" || new Date(session.startAt) < rangeStart || new Date(session.startAt) >= rangeEnd || eventIds.has(session.googleEventId));
+    events.forEach(event => {
+      const start = new Date(event.startAt), end = new Date(event.endAt), index = sessions.findIndex(session => session.googleEventId === event.id), current = sessions[index];
+      const imported = { ...(current || {}), id: current?.id || `google-${event.id}`, googleEventId: event.id, source: "google-focusmate", label: event.title, startAt: start.toISOString(), durationSecs: Math.max(60, Math.round((end - start) / 1000)), status: current?.status === "done" ? "done" : "pending", tasks: current?.tasks || [], importedAt: new Date().toISOString() };
+      if (index >= 0) sessions[index] = imported; else sessions.push(imported);
+    });
+    writeSessions(sessions); localStorage.setItem(GOOGLE_SYNC_KEY, new Date().toISOString()); ipcRenderer.send("session-created");
+    renderSidePanel(); renderCalendar();
+    if (showFeedback) showMsg(`${events.length} sesiones de Focusmate sincronizadas`);
+  } catch (error) { if (showFeedback) showMsg(error.message || "No se pudo sincronizar"); }
+}
+
+async function refreshGoogleStatus() {
+  const status = await ipcRenderer.invoke("google-calendar-status");
+  $("googleStatus").textContent = status.connected ? "Conectado · listo para sincronizar" : status.configured ? "Client ID guardado · falta conectar" : "Todavia no configurado";
 }
 
 function readProjects() {
@@ -247,6 +283,7 @@ function renderCalendar() {
       didAutoScroll = true;
     }
   });
+  renderFocusmateGoal();
 }
 
 function cell(className, text) {
@@ -585,6 +622,10 @@ $("prevWeekBtn").addEventListener("click", () => moveRange(-1));
 $("nextWeekBtn").addEventListener("click", () => moveRange(1));
 $("todayBtn").addEventListener("click", goToday);
 $("registerModeBtn").addEventListener("click", toggleRegisterMode);
+$("googleCalendarBtn").addEventListener("click", () => { $("googleDialog").showModal(); refreshGoogleStatus(); });
+$("saveGoogleClientBtn").addEventListener("click", async () => { try { await ipcRenderer.invoke("google-calendar-configure", $("googleClientId").value); await refreshGoogleStatus(); } catch (error) { $("googleStatus").textContent = error.message; } });
+$("connectGoogleBtn").addEventListener("click", async () => { try { $("googleStatus").textContent = "Abriendo Google..."; await ipcRenderer.invoke("google-calendar-connect"); await refreshGoogleStatus(); await syncGoogleCalendar(); } catch (error) { $("googleStatus").textContent = error.message; } });
+$("syncGoogleBtn").addEventListener("click", () => syncGoogleCalendar());
 $("weekViewBtn").addEventListener("click", () => setVisibleDays(7));
 $("threeDayViewBtn").addEventListener("click", () => setVisibleDays(3));
 $("durationSelect").addEventListener("change", renderCalendar);
@@ -602,6 +643,7 @@ $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-wi
 
 renderSidePanel();
 renderCalendar();
+ipcRenderer.invoke("google-calendar-status").then(status => { if (status.connected) syncGoogleCalendar(false); });
 setInterval(() => {
   const now = new Date();
   const currentVisible = getVisibleDays().some(day => day.toDateString() === now.toDateString());

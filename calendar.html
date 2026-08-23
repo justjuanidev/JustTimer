@@ -27,7 +27,10 @@
       <div class="week-label" id="weekLabel">--</div>
       <button class="tool-btn" id="todayBtn">Hoy</button>
       <button class="tool-btn" id="registerModeBtn">Registro</button>
+      <button class="tool-btn" id="googleCalendarBtn">Google Calendar</button>
     </div>
+
+    <section class="focusmate-goal" id="focusmateGoal"></section>
 
     <div class="calendar-layout">
       <section class="calendar-grid" id="calendarGrid" aria-label="Calendario semanal"></section>
@@ -50,6 +53,16 @@
     <div class="selected-info" id="selectedInfo">Eleg&iacute; un bloque futuro de 15 minutos</div>
     <div class="error-msg hidden" id="calendarMsg"></div>
   </main>
+
+  <dialog class="habit-dialog" id="googleDialog">
+    <form class="habit-form" method="dialog">
+      <div class="review-title">Google Calendar + Focusmate</div>
+      <div class="side-copy">Pega el Client ID de una aplicacion de escritorio creada en Google Cloud. JustTimer solo solicita permiso de lectura.</div>
+      <input class="tool-input" id="googleClientId" placeholder="...apps.googleusercontent.com" />
+      <div class="note-actions"><button class="tool-btn" id="saveGoogleClientBtn" type="button">Guardar</button><button class="tool-btn primary" id="connectGoogleBtn" type="button">Conectar</button><button class="tool-btn" id="syncGoogleBtn" type="button">Sincronizar</button><button class="tool-btn" value="cancel">Cerrar</button></div>
+      <div class="selected-info" id="googleStatus"></div>
+    </form>
+  </dialog>
 
   <script src="calendar.js"></script>
 </body>

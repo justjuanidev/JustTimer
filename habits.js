@@ -27,6 +27,7 @@ function readJson(key, fallback) {
 
 function writeJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+  ipcRenderer.send("data-changed");
 }
 
 function readHabits() {
@@ -132,6 +133,26 @@ function render() {
   $("dailyPanel").classList.toggle("danger-panel", dailyPending.length > 0);
 
   if (selectedHabitId) renderHabitDetail(selectedHabitId);
+  scheduleNotifications(habits, logs, now);
+}
+
+function scheduleNotifications(habits, logs, now = new Date()) {
+  const reminders = [];
+  habits.filter(habit => !habitDone(habit, logs)).forEach(habit => {
+    (habit.reminderTimes || []).forEach(time => {
+      const [hour, minute] = time.split(":").map(Number), at = new Date(now);
+      at.setHours(hour, minute, 0, 0);
+      reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" });
+    });
+    if (habit.kind === "phase" && habit.remindBeforePhaseEnd) {
+      const endHour = PHASES[habit.phase]?.end;
+      if (endHour) {
+        const at = new Date(now); at.setHours(endHour % 24, 0, 0, 0); if (endHour >= 24) at.setDate(at.getDate() + 1); at.setMinutes(at.getMinutes() - 15);
+        reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" });
+      }
+    }
+  });
+  ipcRenderer.send("schedule-habit-notifications", reminders);
 }
 
 function setWarning(id, message) {
@@ -349,6 +370,8 @@ function openHabitForm() {
   $("habitKindSelect").value = "phase";
   $("habitPhaseSelect").value = "morning";
   $("habitTargetInput").value = "1";
+  $("habitReminderTimes").value = "";
+  $("habitPhaseEndReminder").checked = true;
   buildDayButtons();
   $("habitFormDialog").showModal();
 }
@@ -360,12 +383,15 @@ function saveHabit(event) {
   const kind = $("habitKindSelect").value;
   const days = [...$("habitDays").querySelectorAll("input:checked")].map(input => Number(input.value));
   const habits = readHabits();
+  const reminderTimes = $("habitReminderTimes").value.split(",").map(value => value.trim()).filter(value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
   habits.push({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name,
     kind,
     phase: kind === "phase" ? $("habitPhaseSelect").value : null,
     targetCount: Math.max(1, Number($("habitTargetInput").value) || 1),
+    reminderTimes,
+    remindBeforePhaseEnd: kind === "phase" && $("habitPhaseEndReminder").checked,
     days: days.length ? days : [0, 1, 2, 3, 4, 5, 6],
     createdAt: new Date().toISOString(),
   });
@@ -395,6 +421,7 @@ $("habitDifficulty").addEventListener("input", event => {
 });
 $("habitKindSelect").addEventListener("change", event => {
   $("habitPhaseSelect").classList.toggle("hidden", event.target.value !== "phase");
+  $("habitPhaseEndReminder").parentElement.classList.toggle("hidden", event.target.value !== "phase");
 });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 

@@ -24,6 +24,7 @@
       "main.js",
       "scripts.js",
       "calendar.js",
+      "google-calendar.js",
       "tasks.js",
       "habits.js",
       "stats.js",

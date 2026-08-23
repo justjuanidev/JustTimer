@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Notification } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const GoogleCalendar = require("./google-calendar");
 const { autoUpdater } = require("electron-updater");
 const DATA_SCHEMA_VERSION = 1;
 const DATA_ROOT = path.join(app.getPath("appData"), "JustTimerData");
@@ -129,6 +130,39 @@ app.commandLine.appendSwitch("in-process-gpu");
 let mainWindow;
 const childWindows = new Map();
 let lastSnapshotStorage = "";
+let googleCalendar;
+const notifiedHabitKeys = new Set();
+
+function showDueHabitNotifications(reminders = []) {
+  const now = Date.now();
+  reminders.forEach(reminder => {
+    const at = new Date(reminder.at).getTime();
+    const key = `${reminder.habitId}:${reminder.at}:${reminder.kind || "time"}`;
+    if (notifiedHabitKeys.has(key) || at < now - 65000 || at > now) return;
+    notifiedHabitKeys.add(key);
+    if (Notification.isSupported()) new Notification({ title: "JustTimer · Habito pendiente", body: reminder.body }).show();
+  });
+}
+
+async function checkHabitNotifications() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  try {
+    const payload = await mainWindow.webContents.executeJavaScript(`(() => {
+      const habits = JSON.parse(localStorage.getItem("justtimer.habits.v1") || "[]");
+      const logs = JSON.parse(localStorage.getItem("justtimer.habitLogs.v1") || "{}");
+      return { habits, logs };
+    })()`, true);
+    const now = new Date(), dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const reminders = [];
+    (payload.habits || []).filter(habit => !habit.archived && (!habit.days?.length || habit.days.includes(now.getDay()))).forEach(habit => {
+      const current = payload.logs?.[`${habit.id}:${dayKey}`] || {};
+      if (current.justified || Number(current.count) >= Math.max(1, Number(habit.targetCount) || 1)) return;
+      (habit.reminderTimes || []).forEach(time => { const [hour, minute] = time.split(":").map(Number), at = new Date(now); at.setHours(hour, minute, 0, 0); reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" }); });
+      if (habit.kind === "phase" && habit.remindBeforePhaseEnd) { const ends = { morning: 12, afternoon: 19, night: 28 }, end = ends[habit.phase]; if (end) { const at = new Date(now); at.setHours(end % 24, 0, 0, 0); if (end >= 24) at.setDate(at.getDate() + 1); at.setMinutes(at.getMinutes() - 15); reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" }); } }
+    });
+    showDueHabitNotifications(reminders);
+  } catch (error) { log.warn("Habit notifications skipped:", error.message); }
+}
 
 function writeDataSnapshot(storage) {
   if (!storage || typeof storage !== "object" || Array.isArray(storage)) return;
@@ -208,7 +242,10 @@ function openChildWindow(key, file, options) {
 }
 
 app.whenReady().then(() => {
+  googleCalendar = new GoogleCalendar(path.join(app.getPath("userData"), "google-calendar.json"));
   createWindow();
+  mainWindow.webContents.on("did-finish-load", checkHabitNotifications);
+  setInterval(checkHabitNotifications, 30 * 1000).unref();
   setInterval(() => captureSnapshotFromWindow(mainWindow), 5 * 60 * 1000).unref();
   // Initialize auto-updater after window is ready
   try {
@@ -231,6 +268,26 @@ ipcMain.on("resize", (event, height) => {
 
 ipcMain.on("close-app", () => {
   app.quit();
+});
+
+ipcMain.handle("request-app-close", async (_event, pendingHabits = []) => {
+  if (pendingHabits.length) {
+    const result = await dialog.showMessageBox(mainWindow, { type: "warning", title: "Habitos pendientes", message: `Antes de cerrar faltan ${pendingHabits.length} habitos`, detail: `${pendingHabits.slice(0, 8).join("\n")}\n\nCompletalos o deja una justificacion.`, buttons: ["Abrir habitos", "Seguir usando JustTimer"], defaultId: 0 });
+    if (result.response === 0) openChildWindow("habits", "habits.html", { width: 760, height: 620, resizable: true });
+    return { closed: false };
+  }
+  app.quit();
+  return { closed: true };
+});
+
+ipcMain.handle("google-calendar-status", () => googleCalendar.status());
+ipcMain.handle("google-calendar-configure", (_event, clientId) => googleCalendar.configure(clientId));
+ipcMain.handle("google-calendar-connect", () => googleCalendar.connect());
+ipcMain.handle("google-calendar-disconnect", () => googleCalendar.disconnect());
+ipcMain.handle("google-calendar-sync", (_event, range) => googleCalendar.events(range.timeMin, range.timeMax));
+
+ipcMain.on("schedule-habit-notifications", (_event, reminders = []) => {
+  showDueHabitNotifications(reminders);
 });
 
 ipcMain.on("close-current-window", event => {

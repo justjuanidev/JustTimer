@@ -1024,7 +1024,13 @@ $("pendingSessions").addEventListener("click", event => {
   resizeWindow();
 });
 
-$("closeBtn").addEventListener("click", () => ipcRenderer.send("close-app"));
+$("closeBtn").addEventListener("click", () => {
+  const today = new Date(), day = today.getDay(), key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  let habits = [], logs = {};
+  try { habits = JSON.parse(localStorage.getItem("justtimer.habits.v1") || "[]"); logs = JSON.parse(localStorage.getItem("justtimer.habitLogs.v1") || "{}"); } catch {}
+  const pending = habits.filter(habit => !habit.archived && (!habit.days?.length || habit.days.includes(day))).filter(habit => { const log = logs[`${habit.id}:${key}`] || {}; return !(log.justified || Number(log.count) >= Math.max(1, Number(habit.targetCount) || 1)); }).map(habit => `• ${habit.name}`);
+  ipcRenderer.invoke("request-app-close", pending);
+});
 
 ipcRenderer.on("sessions-updated", updateSessionSummary);
 window.addEventListener("focus", () => {

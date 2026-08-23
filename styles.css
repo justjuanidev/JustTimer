@@ -966,6 +966,10 @@ body.main-window .close-btn {
   align-items: center;
 }
 
+.focusmate-goal { display:flex; align-items:center; gap:14px; margin:8px 0; padding:9px 12px; border-radius:10px; background:rgba(255,180,70,.16); color:#ffe1a8; font-size:12px; }
+.focusmate-goal.complete { background:rgba(66,184,107,.16); color:#bff3cf; }
+.focusmate-goal strong { font-size:13px; }
+
 .calendar-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
