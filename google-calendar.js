@@ -83,9 +83,19 @@ class GoogleCalendar {
 
   async events(timeMin, timeMax) {
     const token = await this.accessToken();
+    const headers = { authorization: `Bearer ${token}` };
+    const calendarList = await requestJson("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250", { headers });
+    const focusmateCalendars = (calendarList.items || []).filter(calendar => /focusmate/i.test(`${calendar.summary || ""} ${calendar.summaryOverride || ""}`));
+    const targets = focusmateCalendars.length ? focusmateCalendars : [{ id: "primary", summary: "Principal", filterEvents: true }];
     const params = new URLSearchParams({ timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "2500" });
-    const data = await requestJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, { headers: { authorization: `Bearer ${token}` } });
-    return (data.items || []).filter(event => event.status !== "cancelled" && /focusmate/i.test(`${event.summary || ""} ${event.description || ""}`)).map(event => ({ id: event.id, title: event.summary || "Focusmate", startAt: event.start?.dateTime, endAt: event.end?.dateTime, htmlLink: event.htmlLink })).filter(event => event.startAt && event.endAt);
+    const groups = await Promise.all(targets.map(async calendar => {
+      const data = await requestJson(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendar.id)}/events?${params}`, { headers });
+      return (data.items || [])
+        .filter(event => event.status !== "cancelled" && (!calendar.filterEvents || /focusmate/i.test(`${event.summary || ""} ${event.description || ""}`)))
+        .map(event => ({ id: `${calendar.id}:${event.id}`, googleCalendarId: calendar.id, calendarName: calendar.summary || "Focusmate", title: event.summary || "Focusmate", startAt: event.start?.dateTime, endAt: event.end?.dateTime, htmlLink: event.htmlLink }))
+        .filter(event => event.startAt && event.endAt);
+    }));
+    return groups.flat();
   }
 
   disconnect() { this.state = { clientId: this.state.clientId, clientSecret: this.state.clientSecret }; this.save(); return this.status(); }
