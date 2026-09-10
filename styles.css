@@ -657,10 +657,11 @@ body.main-window .close-btn {
 .inline-task-add input::placeholder { color: rgba(255,255,255,.58); }
 .inline-task-list { display: flex; flex-direction: column; gap: 5px; max-height: 180px; overflow: auto; margin-top: 8px; }
 .inline-task-row {
-  display: grid; grid-template-columns: 14px 23px minmax(0,1fr) 22px auto 23px; align-items: center; gap: 5px;
+  display: grid; grid-template-columns: 14px 23px minmax(0,1fr) 22px 20px auto 23px; align-items: center; gap: 4px;
   min-height: 34px; padding: 5px 6px; border-radius: 10px; color: white; background: rgba(255,255,255,.12); font-size: 11px; font-weight: 750;
 }
 .inline-task-row.active { outline: 1px solid rgba(255,255,255,.72); background: rgba(255,255,255,.2); }
+.inline-task-row.inline-subtask { margin-left:13px; background:rgba(255,255,255,.08); }.inline-task-row.inline-subtask .inline-drag { letter-spacing:0; cursor:default; }
 .inline-task-row.dragging { opacity: .48; }
 .inline-drag { color: rgba(255,255,255,.55); cursor: grab; font-size: 12px; letter-spacing: -3px; }
 .inline-task-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -670,12 +671,14 @@ body.main-window .close-btn {
 .inline-check { width: 19px; height: 19px; border: 2px solid rgba(255,255,255,.75); border-radius: 50%; color: white; background: transparent; font-size: 10px; font-weight: 900; }
 .inline-task-row.done .inline-check { border-color: #45bd78; background: #32a965; }
 .inline-active { width: 22px; height: 22px; border-radius: 50%; color: white; background: rgba(255,255,255,.13); font-size: 10px; }
+.inline-add-subtask { width:20px; height:22px; border-radius:7px; color:white; background:rgba(255,255,255,.13); font-size:14px; font-weight:900; }.inline-add-subtask:hover { background:rgba(255,255,255,.25); }
 .inline-task-row.active .inline-active { color: #315c38; background: #dff4c4; }
 .inline-priority { padding: 4px 6px; border-radius: 99px; font-size: 8px; font-weight: 900; }
 .inline-priority.priority-high { color: #8f1d19; background: #ffd7d3; }
 .inline-priority.priority-medium { color: #8a5700; background: #ffedbd; }
 .inline-priority.priority-low { color: #17643b; background: #d9f5e4; }
 .inline-task-empty { padding: 9px; color: rgba(255,255,255,.62); text-align: center; font-size: 10px; }
+.inline-subtask-add { display:grid; grid-template-columns:minmax(0,1fr) 25px; gap:5px; margin:-1px 4px 3px 31px; }.inline-subtask-add.nested { margin-left:44px; }.inline-subtask-add input { min-width:0; padding:6px 8px; border:1px solid rgba(255,255,255,.25); border-radius:8px; color:white; background:rgba(255,255,255,.13); font-size:10px; }.inline-subtask-add input::placeholder { color:rgba(255,255,255,.55); }.inline-subtask-add button { border-radius:8px; color:white; background:rgba(255,255,255,.2); font-size:14px; font-weight:900; }
 
 .current-task-label {
   max-width: 238px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 5px;
@@ -1838,6 +1841,13 @@ body.main-window .close-btn {
 .mini-card { padding:14px; color:inherit; text-align:left; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); border-radius:12px; }
 .mini-card h3 { margin:0 0 4px; }.mini-card p { margin:3px 0; opacity:.66; font-size:11px; }.mini-card .tool-btn { margin-top:9px; }
 .mini-form { display:grid; grid-template-columns:1fr 120px 100px; gap:8px; }.mini-form button { grid-column:auto; }
+.mini-icon-input { text-align:center; font-size:20px; }
+.mini-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.mini-card-head h3 { min-width:0; }
+.mini-emoji-edit { width:34px; height:34px; flex:0 0 34px; border:1px solid rgba(255,255,255,.16); border-radius:9px; background:rgba(255,255,255,.1); font-size:19px; }
+.mini-stats { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; margin:10px 0 7px; }
+.mini-stats span { min-width:0; padding:7px 4px; border-radius:8px; text-align:center; background:rgba(255,255,255,.08); }
+.mini-stats b,.mini-stats small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.mini-stats b { font-size:11px; }.mini-stats small { margin-top:2px; opacity:.6; font-size:8px; text-transform:uppercase; }
 .mini-timer { display:grid; place-items:center; flex:1; text-align:center; }.mini-countdown { font-size:62px; font-weight:900; font-variant-numeric:tabular-nums; }.mini-progress-note { width:min(480px,90%); margin:12px 0; }
 
 /* Day tasks & tab toggle */

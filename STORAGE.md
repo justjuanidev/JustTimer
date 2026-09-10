@@ -24,7 +24,7 @@ El almacenamiento local conserva las claves versionadas siguientes:
 - `justtimer.workChannels.v1`: canales de trabajo personalizables, nombre y foto de perfil.
 - `justtimer.workArea.v1`: canal predeterminado para nuevas sesiones (`JustJuani` o `Laburo`).
 - `justtimer.habits.v1` y claves relacionadas: hábitos y registros.
-- `justtimer.miniProjects.v1` y `justtimer.miniProjectSessions.v1`: mini-proyectos opcionales, mínimo recomendado, notas de continuidad y tiempo acumulado.
+- `justtimer.miniProjects.v1` y `justtimer.miniProjectSessions.v1`: mini-proyectos opcionales, emoji personalizable, mínimo recomendado, notas de continuidad y tiempo acumulado. Su panel resume sesiones y tiempo total, semanal, mensual y anual desde el historial real.
 - `justtimer.miniProjectContext.v1`: próxima sesión usada para limitar el timer a un minuto antes de su inicio.
 - `justtimer.sessionTypes.v1`: tipos de sesión.
 - `justtimer.activeSession.v1`: recuperación de la sesión en curso.
@@ -74,7 +74,9 @@ mismo registro diario y dejan de avisar al completar o justificar el hábito.
 
 Las subtareas se guardan como tareas normales con `parentTaskId`, por lo que cada
 una puede acumular tiempo, completarse y asignarse a sesiones de manera
-independiente. Las secciones de proyectos guardan `orientation` (`horizontal` o
+independiente. Durante una sesión también pueden crearse desde la tarea madre:
+se vinculan al proyecto original, aparecen anidadas en el timer y pueden elegirse
+como tarea activa para contabilizar su propio tiempo. Las secciones de proyectos guardan `orientation` (`horizontal` o
 `vertical`) y los proyectos pueden cambiar de canal conservando sus tareas y el
 historial de sesiones asociado.
 

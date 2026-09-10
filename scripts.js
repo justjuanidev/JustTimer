@@ -44,6 +44,8 @@ let lastTaskCheckpointAt = 0;
 let lastSessionPersistAt = 0;
 let pendingSessionsSignature = "";
 const soundCache = new Map();
+const openInlineSubtaskIds = new Set();
+const inlineSubtaskDrafts = new Map();
 
 function $(id) {
   return document.getElementById(id);
@@ -97,6 +99,20 @@ function readProjectTasks() {
 
 function linkedProjectTaskId(task) {
   return task.projectTaskId || task.movedFromDayTaskId || null;
+}
+
+function freshId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+
+function sessionTaskParentId(task, projectTaskMap = new Map()) {
+  if (task.parentSessionTaskId) return task.parentSessionTaskId;
+  const parentProjectTaskId=projectTaskMap.get(linkedProjectTaskId(task))?.parentTaskId;
+  if (!parentProjectTaskId) return null;
+  return readTasks().find(item=>linkedProjectTaskId(item)===parentProjectTaskId)?.id || null;
+}
+
+function cloneTasksForCarry(tasks, sourceSessionId) {
+  const ids=new Map(tasks.map(task=>[task.id,freshId()]));
+  return tasks.map(task=>({...task,id:ids.get(task.id),parentSessionTaskId:ids.get(task.parentSessionTaskId)||null,done:false,completedAt:null,focusedSecs:0,carriedFromSessionId:sourceSessionId}));
 }
 
 function syncProjectTasksFromSession(sessionTasks = readTasks(), sessionId = activePendingSessionId) {
@@ -1144,7 +1160,7 @@ function finishSession({ skip = false } = {}) {
   const current = activePendingSessionId ? readSessions().find(session => session.id === activePendingSessionId) : null;
   const unfinished = reviewedTasks.filter(task => !task.deleted && !task.done);
   const next = current && !skip && $("reviewCarryMode").value === "next" ? nextPendingSession(current) : null;
-  const keepPending = unfinished.map(task => ({ ...task, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, focusedSecs: 0, carriedFromSessionId: activePendingSessionId }));
+  const keepPending = cloneTasksForCarry(unfinished, activePendingSessionId);
   if (activePendingSessionId) {
     const workArea = skip ? (current?.workArea || "personal") : ($("reviewWorkArea").value || "personal");
     const selectedProjectId = skip ? (current?.projectId || null) : ($("reviewProject").value || null);
@@ -1166,15 +1182,7 @@ function finishSession({ skip = false } = {}) {
     syncProjectTasksFromSession(reviewedTasks, activePendingSessionId);
     if (next && unfinished.length) {
       const existingLinks = new Set((next.tasks || []).map(task => linkedProjectTaskId(task) || task.id));
-      const carried = unfinished.filter(task => !existingLinks.has(linkedProjectTaskId(task) || task.id)).map(task => ({
-        ...task,
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        done: false,
-        completedAt: null,
-        focusedSecs: 0,
-        carriedFromSessionId: activePendingSessionId,
-        projectTaskId: linkedProjectTaskId(task),
-      }));
+      const carried = cloneTasksForCarry(unfinished.filter(task => !existingLinks.has(linkedProjectTaskId(task) || task.id)), activePendingSessionId).map(task=>({ ...task, projectTaskId:linkedProjectTaskId(task) }));
       updateSession(next.id, { tasks: [...(next.tasks || []), ...carried] });
       syncProjectTasksFromSession(carried, next.id);
     }
@@ -1309,15 +1317,32 @@ function persistInlineTasks(nextTasks) {
   renderInlineTasks();
   renderCurrentTask();
 }
+function addInlineSubtask(parentTask, text) {
+  const value=String(text||"").trim(); if(!value)return;
+  if(parentTask.id===activeTaskId)checkpointActiveTaskTime();
+  const nowIso=new Date().toISOString(), projectTasks=readProjectTasks(), parentProjectTaskId=linkedProjectTaskId(parentTask), parentProjectTask=projectTasks.find(task=>task.id===parentProjectTaskId);
+  let projectTaskId=null;
+  if(parentProjectTask){
+    projectTaskId=freshId();
+    const projectSubtask={id:projectTaskId,parentTaskId:parentProjectTask.id,text:value,done:false,notes:"",priority:parentTask.priority||parentProjectTask.priority||"medium",deleted:false,category:parentProjectTask.category||"inbox",dueDate:parentProjectTask.dueDate||null,mode:parentProjectTask.mode||"personal",projectId:parentProjectTask.projectId,focusedSecs:0,sessionIds:activePendingSessionId?[activePendingSessionId]:[],sessionCount:activePendingSessionId?1:0,createdAt:nowIso};
+    localStorage.setItem(DAY_TASKS_KEY,JSON.stringify([...projectTasks,projectSubtask])); ipcRenderer.send("data-changed");
+  }
+  const sessionSubtask={id:freshId(),parentSessionTaskId:parentTask.id,parentProjectTaskId:parentProjectTaskId||null,projectTaskId,movedFromDayTaskId:projectTaskId,text:value,done:false,notes:"",priority:parentTask.priority||"medium",deleted:false,focusedSecs:0,createdAt:nowIso};
+  openInlineSubtaskIds.delete(parentTask.id); inlineSubtaskDrafts.delete(parentTask.id); persistInlineTasks([...readTasks(),sessionSubtask]);
+}
 function renderInlineTasks() {
-  const list = $("inlineTaskList"), items = readTasks().filter(task => !task.deleted);
+  const list = $("inlineTaskList"), items = readTasks().filter(task => !task.deleted), projectTaskMap=new Map(readProjectTasks().map(task=>[task.id,task]));
   list.innerHTML = "";
   if (!items.length) { list.innerHTML = '<div class="inline-task-empty">Todavía no hay tareas para esta sesión.</div>'; resizeWindow(); return; }
-  items.forEach(task => {
-    const row = document.createElement("div"); row.className = `inline-task-row ${task.done ? "done" : ""} ${task.id === activeTaskId ? "active" : ""}`;
-    row.draggable = true;
+  const parentById=new Map(items.map(task=>[task.id,sessionTaskParentId(task,projectTaskMap)])), ordered=[],added=new Set();
+  const appendBranch=task=>{if(added.has(task.id))return;added.add(task.id);ordered.push(task);items.filter(child=>parentById.get(child.id)===task.id).forEach(appendBranch);};
+  items.filter(task=>!parentById.get(task.id)||!items.some(parent=>parent.id===parentById.get(task.id))).forEach(appendBranch); items.forEach(appendBranch);
+  ordered.forEach(task => {
+    const parentId=parentById.get(task.id), isSubtask=Boolean(parentId);
+    const row = document.createElement("div"); row.className = `inline-task-row ${isSubtask?"inline-subtask":""} ${task.done ? "done" : ""} ${task.id === activeTaskId ? "active" : ""}`;
+    row.draggable = !isSubtask;
     row.dataset.taskId = task.id;
-    row.innerHTML = `<span class="inline-drag" title="Arrastrar">⋮⋮</span><button class="inline-check" type="button">${task.done ? "✓" : ""}</button><span class="inline-task-copy"><b></b><small>${formatTaskDuration(sessionTaskElapsed(task))}</small></span><button class="inline-active" type="button" title="Trabajar en esta tarea">${task.id === activeTaskId ? "▶" : "▷"}</button><button class="inline-priority priority-${task.priority || "medium"}" type="button">${priorityLabel(task.priority)}</button><button class="inline-delete" type="button">×</button>`;
+    row.innerHTML = `<span class="inline-drag" title="${isSubtask?"Subtarea":"Arrastrar"}">${isSubtask?"↳":"⋮⋮"}</span><button class="inline-check" type="button">${task.done ? "✓" : ""}</button><span class="inline-task-copy"><b></b><small>${isSubtask?"Subtarea · ":""}${formatTaskDuration(sessionTaskElapsed(task))}</small></span><button class="inline-active" type="button" title="Trabajar en esta tarea">${task.id === activeTaskId ? "▶" : "▷"}</button><button class="inline-add-subtask" type="button" title="Agregar subtarea">+</button><button class="inline-priority priority-${task.priority || "medium"}" type="button">${priorityLabel(task.priority)}</button><button class="inline-delete" type="button">×</button>`;
     row.querySelector(".inline-task-copy b").textContent = task.text;
     row.querySelector(".inline-check").addEventListener("click", () => {
       if (task.id === activeTaskId) checkpointActiveTaskTime();
@@ -1326,13 +1351,15 @@ function renderInlineTasks() {
       if (task.id === activeTaskId && !task.done) chooseDefaultActiveTask();
     });
     row.querySelector(".inline-active").addEventListener("click", () => !task.done && setActiveTask(task.id));
+    row.querySelector(".inline-add-subtask").addEventListener("click",()=>{openInlineSubtaskIds.has(task.id)?openInlineSubtaskIds.delete(task.id):openInlineSubtaskIds.add(task.id);renderInlineTasks();});
     row.querySelector(".inline-priority").addEventListener("click", () => { const order = ["low", "medium", "high"], next = order[(order.indexOf(task.priority || "medium") + 1) % order.length]; persistInlineTasks(readTasks().map(item => item.id === task.id ? { ...item, priority: next } : item)); });
     row.querySelector(".inline-delete").addEventListener("click", () => {
       if (task.id === activeTaskId) checkpointActiveTaskTime();
-      persistInlineTasks(readTasks().filter(item => item.id !== task.id));
+      const current=readTasks(),removeIds=new Set([task.id]);let grew=true;while(grew){grew=false;current.forEach(item=>{if(!removeIds.has(item.id)&&removeIds.has(sessionTaskParentId(item,projectTaskMap))){removeIds.add(item.id);grew=true;}});}
+      persistInlineTasks(current.filter(item => !removeIds.has(item.id)));
       if (task.id === activeTaskId) chooseDefaultActiveTask();
     });
-    row.addEventListener("dragstart", event => { event.dataTransfer.setData("text/plain", task.id); row.classList.add("dragging"); });
+    row.addEventListener("dragstart", event => { if(isSubtask){event.preventDefault();return;}event.dataTransfer.setData("text/plain", task.id); row.classList.add("dragging"); });
     row.addEventListener("dragend", () => row.classList.remove("dragging"));
     row.addEventListener("dragover", event => event.preventDefault());
     row.addEventListener("drop", event => {
@@ -1346,6 +1373,10 @@ function renderInlineTasks() {
       chooseDefaultActiveTask();
     });
     list.appendChild(row);
+    if(openInlineSubtaskIds.has(task.id)){
+      const form=document.createElement("form");form.className=`inline-subtask-add ${isSubtask?"nested":""}`;form.innerHTML='<input maxlength="90" placeholder="Ej. Sacar la basura" /><button type="submit">+</button>';
+      const input=form.querySelector("input");input.value=inlineSubtaskDrafts.get(task.id)||"";input.addEventListener("input",()=>inlineSubtaskDrafts.set(task.id,input.value));form.addEventListener("submit",event=>{event.preventDefault();addInlineSubtask(task,input.value);});list.appendChild(form);requestAnimationFrame(()=>input.focus());
+    }
   });
   resizeWindow();
 }

@@ -25,6 +25,7 @@ let selectedWorkChannelImage = null, editingWorkChannelId = null;
 let renderCache = null;
 let pendingEditorSave = null;
 let movingProjectId = null;
+let pendingExternalTaskRefresh = false;
 const expandedTaskIds = new Set();
 
 function $(id) { return document.getElementById(id); }
@@ -283,8 +284,16 @@ function renderTasks() {
 
 function addSubtask(event, parent) {
   event.preventDefault(); const input = event.currentTarget.querySelector("input"), text = input.value.trim(); if (!text) return;
-  const all = tasks(); all.push({ id:uid(), parentTaskId:parent.id, text, done:false, notes:"", priority:parent.priority || "medium", deleted:false, category:parent.category || "inbox", dueDate:parent.dueDate || null, mode:projectWorkChannel(projects().find(project => project.id === parent.projectId)), projectId:parent.projectId, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() });
-  writeArray(DAY_TASKS_KEY, all); expandedTaskIds.add(parent.id); renderDetail();
+  const all = readArray(DAY_TASKS_KEY), nowIso=new Date().toISOString(), subtask={ id:uid(), parentTaskId:parent.id, text, done:false, notes:"", priority:parent.priority || "medium", deleted:false, category:parent.category || "inbox", dueDate:parent.dueDate || null, mode:projectWorkChannel(projects().find(project => project.id === parent.projectId)), projectId:parent.projectId, focusedSecs:0, sessionIds:[], createdAt:nowIso };
+  const running=activeSession(), sessionTasks=readArray(TASKS_KEY), parentSessionTask=sessionTasks.find(task=>(task.projectTaskId||task.movedFromDayTaskId)===parent.id);
+  if(running?.sessionId&&parentSessionTask){
+    const sessionTask={id:uid(),parentSessionTaskId:parentSessionTask.id,parentProjectTaskId:parent.id,projectTaskId:subtask.id,movedFromDayTaskId:subtask.id,text,done:false,notes:"",priority:subtask.priority,deleted:false,focusedSecs:0,createdAt:nowIso};
+    subtask.sessionIds=[running.sessionId];subtask.sessionCount=1;sessionTasks.push(sessionTask);
+    localStorage.setItem(TASKS_KEY,JSON.stringify(sessionTasks));
+    localStorage.setItem(SESSIONS_KEY,JSON.stringify(readArray(SESSIONS_KEY).map(session=>session.id===running.sessionId?{...session,tasks:sessionTasks}:session)));
+    ipcRenderer.send("session-created");
+  }
+  all.push(subtask); writeArray(DAY_TASKS_KEY, all); expandedTaskIds.add(parent.id); renderDetail();
 }
 
 function addTask(event) {
@@ -526,9 +535,22 @@ $("projectForm").addEventListener("submit", event => {
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 document.addEventListener("click", event => { if (!event.target.closest(".card-menu") && !event.target.closest(".card-popover")) document.querySelectorAll(".card-popover").forEach(item => item.classList.add("hidden")); });
 window.addEventListener("focus", () => { applyTaskAutomations(); projectId ? renderDetail() : renderLibrary(); });
+function hasUnsavedTaskDraft() {
+  if ($("projectEditDialog")?.open) return true;
+  if ($("newTaskInput")?.value.trim()) return true;
+  return [...document.querySelectorAll(".subtask-add input")].some(input=>input.value.trim());
+}
 window.addEventListener("storage", event => {
-  if ([DAY_TASKS_KEY, SESSIONS_KEY, TASKS_KEY].includes(event.key)) projectId ? renderDetail() : renderLibrary();
+  if ([DAY_TASKS_KEY, SESSIONS_KEY, TASKS_KEY].includes(event.key)) {
+    if (projectId&&hasUnsavedTaskDraft()) pendingExternalTaskRefresh=true;
+    else { pendingExternalTaskRefresh=false; projectId ? renderDetail() : renderLibrary(); }
+  }
   if (event.key === OPEN_PROJECT_KEY && event.newValue) { const target = projects().find(item => item.id === event.newValue && !item.archived); if (target) openProject(target.id); localStorage.removeItem(OPEN_PROJECT_KEY); }
+});
+document.addEventListener("input",event=>{
+  if(!event.target.matches(".subtask-add input,#newTaskInput,#projectEditDialog input,#projectEditDialog select"))return;
+  if(hasUnsavedTaskDraft())pendingExternalTaskRefresh=true;
+  else if(pendingExternalTaskRefresh){pendingExternalTaskRefresh=false;projectId?renderDetail():renderLibrary();}
 });
 
 syncDueTasksToToday(); applyTaskAutomations(); ensureWorkChannels(); ensureChannels();
