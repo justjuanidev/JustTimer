@@ -11,6 +11,7 @@ const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 const HABITS_KEY = "justtimer.habits.v1";
 const HABIT_LOGS_KEY = "justtimer.habitLogs.v1";
 const MINI_CONTEXT_KEY = "justtimer.miniProjectContext.v1";
+const GOOGLE_SYNC_KEY = "justtimer.googleCalendarSync.v1";
 const DEFAULT_DURATION_SECS = 75 * 60;
 
 const SKY_PHASES = [
@@ -76,6 +77,34 @@ function readSessions() {
 function writeSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
   ipcRenderer.send("data-changed");
+}
+
+function reconcileGoogleCalendarEvents(payload = {}) {
+  const events=Array.isArray(payload.events)?payload.events:[],rangeStart=new Date(payload.timeMin),rangeEnd=new Date(payload.timeMax);
+  if(Number.isNaN(rangeStart.getTime())||Number.isNaN(rangeEnd.getTime()))return false;
+  const eventIds=new Set(events.map(event=>event.id)),current=readSessions();let changed=false;
+  const next=current.filter(session=>{
+    if(session.source!=="google-focusmate")return true;
+    const start=new Date(session.startAt),inside=start>=rangeStart&&start<rangeEnd;
+    const keep=!inside||session.status!=="pending"||eventIds.has(session.googleEventId);
+    if(!keep)changed=true;
+    return keep;
+  });
+  const byEvent=new Map(next.filter(session=>session.googleEventId).map(session=>[session.googleEventId,session]));
+  events.forEach(event=>{
+    const start=new Date(event.startAt),end=new Date(event.endAt);if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime()))return;
+    const currentSession=byEvent.get(event.id),status=currentSession?.status&&currentSession.status!=="pending"?currentSession.status:"pending";
+    const patch={googleEventId:event.id,source:"google-focusmate",label:event.title,startAt:start.toISOString(),durationSecs:Math.max(60,Math.round((end-start)/1000)),status,htmlLink:event.htmlLink||null};
+    if(currentSession){
+      const differs=Object.entries(patch).some(([key,value])=>currentSession[key]!==value);
+      if(differs){const index=next.indexOf(currentSession);next[index]={...currentSession,...patch,updatedAt:payload.syncedAt||new Date().toISOString()};changed=true;}
+    }else{
+      const imported={id:`google-${event.id}`,...patch,tasks:[],importedAt:payload.syncedAt||new Date().toISOString()};next.push(imported);byEvent.set(event.id,imported);changed=true;
+    }
+  });
+  localStorage.setItem(GOOGLE_SYNC_KEY,payload.syncedAt||new Date().toISOString());
+  if(!changed)return false;
+  writeSessions(next);ipcRenderer.send("session-created");updateSessionSummary();renderHome();return true;
 }
 
 function readTasks() {
@@ -1444,6 +1473,7 @@ $("useGapBtn").addEventListener("click", event => {
 $("restGapBtn").addEventListener("click", () => $("homeGap").classList.add("hidden"));
 
 ipcRenderer.on("sessions-updated", updateSessionSummary);
+ipcRenderer.on("google-calendar-auto-sync", (_event, payload) => reconcileGoogleCalendarEvents(payload));
 $("reviewWorkArea").addEventListener("change", event => {
   fillVideoSelect($("reviewProject"), event.target.value);
 });

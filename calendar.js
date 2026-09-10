@@ -25,6 +25,8 @@ let editingGoalChannelId = null;
 let calendarMode = "week";
 let monthYear = new Date().getFullYear();
 let selectedMonth = new Date().getMonth();
+let googleSyncInFlight = null;
+let calendarRenderQueued = false;
 const expandedPlannerTaskIds = new Set();
 
 function $(id) {
@@ -192,20 +194,25 @@ function editChannelGoal(channelId) {
 }
 
 async function syncGoogleCalendar(showFeedback = true) {
+  if(googleSyncInFlight)return googleSyncInFlight;
   const rangeStart = addDays(startOfWeek(new Date()), -28), rangeEnd = addDays(rangeStart, 120);
-  try {
+  googleSyncInFlight=(async()=>{try {
     const events = await ipcRenderer.invoke("google-calendar-sync", { timeMin: rangeStart.toISOString(), timeMax: rangeEnd.toISOString() });
     const eventIds = new Set(events.map(event => event.id));
-    const sessions = readSessions().filter(session => session.source !== "google-focusmate" || new Date(session.startAt) < rangeStart || new Date(session.startAt) >= rangeEnd || eventIds.has(session.googleEventId));
+    const previous=readSessions();let changed=false;
+    const sessions = previous.filter(session => {const keep=session.source !== "google-focusmate" || new Date(session.startAt) < rangeStart || new Date(session.startAt) >= rangeEnd || session.status!=="pending" || eventIds.has(session.googleEventId);if(!keep)changed=true;return keep;});
     events.forEach(event => {
       const start = new Date(event.startAt), end = new Date(event.endAt), index = sessions.findIndex(session => session.googleEventId === event.id), current = sessions[index];
-      const imported = { ...(current || {}), id: current?.id || `google-${event.id}`, googleEventId: event.id, source: "google-focusmate", label: event.title, startAt: start.toISOString(), durationSecs: Math.max(60, Math.round((end - start) / 1000)), status: current?.status === "done" ? "done" : "pending", tasks: current?.tasks || [], importedAt: new Date().toISOString() };
-      if (index >= 0) sessions[index] = imported; else sessions.push(imported);
+      const patch={googleEventId:event.id,source:"google-focusmate",label:event.title,startAt:start.toISOString(),durationSecs:Math.max(60,Math.round((end-start)/1000)),status:current?.status&&current.status!=="pending"?current.status:"pending",htmlLink:event.htmlLink||null};
+      if(index>=0){if(Object.entries(patch).some(([key,value])=>current[key]!==value)){sessions[index]={...current,...patch,updatedAt:new Date().toISOString()};changed=true;}}
+      else{sessions.push({id:`google-${event.id}`,...patch,tasks:[],importedAt:new Date().toISOString()});changed=true;}
     });
-    writeSessions(sessions); localStorage.setItem(GOOGLE_SYNC_KEY, new Date().toISOString()); ipcRenderer.send("session-created");
-    renderCalendar();
+    localStorage.setItem(GOOGLE_SYNC_KEY,new Date().toISOString());
+    if(changed){writeSessions(sessions);ipcRenderer.send("session-created");renderCalendar();}
     if (showFeedback) showMsg(`${events.length} sesiones de Focusmate sincronizadas`);
-  } catch (error) { if (showFeedback) showMsg(error.message || "No se pudo sincronizar"); }
+    return {events:events.length,changed};
+  } catch (error) { if (showFeedback) showMsg(error.message || "No se pudo sincronizar");return {events:0,changed:false,error}; }})();
+  try{return await googleSyncInFlight;}finally{googleSyncInFlight=null;}
 }
 
 async function refreshGoogleStatus() {
@@ -1109,8 +1116,9 @@ $("weeklySessionTarget").addEventListener("input", () => { updateFlexibleSession
 $("dailySessionTarget").addEventListener("input", updateDerivedChannelDailyTargets);
 $("weeklyChannelTargets").addEventListener("input", event => { if (event.target.matches("[data-channel-daily-target]")) event.target.dataset.derived="false"; updateFlexibleSessions(); updateDerivedChannelDailyTargets(); });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
-window.addEventListener("focus", renderCalendar);
-window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) renderCalendar(); });
+function scheduleCalendarRender(){if(calendarRenderQueued)return;calendarRenderQueued=true;requestAnimationFrame(()=>{calendarRenderQueued=false;renderCalendar();});}
+window.addEventListener("focus", scheduleCalendarRender);
+window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) scheduleCalendarRender(); });
 
 renderTaskPlanner();
 renderCalendar();

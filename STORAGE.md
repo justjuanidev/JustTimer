@@ -45,6 +45,13 @@ o reordenar la lista solo cambia la atribución del tiempo: el reloj de la sesi�
 continúa corriendo. Al cerrar una sesión, los pendientes pueden copiarse a la
 próxima sesión o permanecer en `justtimer.tasks.v1`.
 
+Google Calendar se consulta automáticamente mientras JustTimer está abierto. Si
+hay sesiones de las próximas 48 horas, se comprueban cambios o cancelaciones cada
+2 minutos; sin sesiones próximas, cada 10 minutos. Las consultas simultáneas se
+unifican, la lista de calendarios se reutiliza durante 15 minutos y sólo se
+reescribe el historial local cuando los eventos realmente cambiaron. Las sesiones
+ya iniciadas o terminadas se conservan aunque el evento externo desaparezca.
+
 - `justtimer.channelGoals.v1`: objetivos editables de minutos diarios y semanales
   por canal. El canal interno `routine` se muestra como “Personal”, usa una J como
   avatar y participa en calendario/estadísticas, pero se oculta de la biblioteca

@@ -1835,12 +1835,13 @@ body.main-window .close-btn {
 .priority-empty { padding:12px; color:rgba(255,255,255,.58); font-size:11px; }
 
 .mini-shell { max-width:none; height:calc(100vh - 28px); }
+.mini-shell #miniLibrary { min-height:0; display:flex; flex:1; flex-direction:column; }
 .mini-hero { display:flex; justify-content:space-between; gap:16px; padding:16px; border-radius:14px; background:linear-gradient(135deg,#eaf2ff,#f5eeff); color:#263553; }
 .mini-hero h2 { margin:2px 0 5px; font-size:22px; }.mini-hero p { color:#65728b; font-size:12px; }
-.mini-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; overflow:auto; }
-.mini-card { padding:14px; color:inherit; text-align:left; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); border-radius:12px; }
+.mini-grid { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(300px,350px); grid-template-columns:none; gap:10px; min-height:205px; flex:0 0 205px; overflow-x:auto; overflow-y:hidden; padding:0 0 8px; scroll-snap-type:x proximity; }
+.mini-card { min-width:0; padding:14px; color:inherit; text-align:left; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); border-radius:12px; scroll-snap-align:start; }
 .mini-card h3 { margin:0 0 4px; }.mini-card p { margin:3px 0; opacity:.66; font-size:11px; }.mini-card .tool-btn { margin-top:9px; }
-.mini-form { display:grid; grid-template-columns:1fr 120px 100px; gap:8px; }.mini-form button { grid-column:auto; }
+.mini-form { display:grid; grid-template-columns:minmax(0,1fr) 120px 100px auto; gap:8px; }.mini-form button { grid-column:auto; }
 .mini-icon-input { text-align:center; font-size:20px; }
 .mini-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .mini-card-head h3 { min-width:0; }
@@ -1849,6 +1850,7 @@ body.main-window .close-btn {
 .mini-stats span { min-width:0; padding:7px 4px; border-radius:8px; text-align:center; background:rgba(255,255,255,.08); }
 .mini-stats b,.mini-stats small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.mini-stats b { font-size:11px; }.mini-stats small { margin-top:2px; opacity:.6; font-size:8px; text-transform:uppercase; }
 .mini-timer { display:grid; place-items:center; flex:1; text-align:center; }.mini-countdown { font-size:62px; font-weight:900; font-variant-numeric:tabular-nums; }.mini-progress-note { width:min(480px,90%); margin:12px 0; }
+@media (max-width:680px) { .mini-grid { grid-auto-columns:minmax(280px,calc(100vw - 64px)); }.mini-form { grid-template-columns:minmax(0,1fr) 85px 64px 92px; } }
 
 /* Day tasks & tab toggle */
 .tab-toggle {

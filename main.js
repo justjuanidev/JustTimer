@@ -128,8 +128,58 @@ let lastSnapshotStorage = "";
 let snapshotTimer = null;
 let snapshotSource = null;
 let googleCalendar;
+let googleCalendarPollTimer = null;
+const googleCalendarRequests = new Map();
 const notifiedHabitKeys = new Set();
 const APP_OPENED_AT = Date.now();
+const GOOGLE_ACTIVE_POLL_MS = 2 * 60 * 1000;
+const GOOGLE_IDLE_POLL_MS = 10 * 60 * 1000;
+const GOOGLE_RETRY_POLL_MS = 5 * 60 * 1000;
+
+function googleCalendarRange() {
+  const timeMin = new Date();
+  timeMin.setDate(timeMin.getDate() - 28);
+  timeMin.setHours(0, 0, 0, 0);
+  const timeMax = new Date(timeMin);
+  timeMax.setDate(timeMax.getDate() + 120);
+  return { timeMin:timeMin.toISOString(), timeMax:timeMax.toISOString() };
+}
+
+function hasUpcomingGoogleSessions(events = []) {
+  const now = Date.now(), horizon = now + 48 * 60 * 60 * 1000;
+  return events.some(event => {
+    const start = new Date(event.startAt).getTime(), end = new Date(event.endAt).getTime();
+    return Number.isFinite(start) && start <= horizon && (!Number.isFinite(end) || end >= now);
+  });
+}
+
+function scheduleGoogleCalendarPoll(delay = GOOGLE_IDLE_POLL_MS) {
+  clearTimeout(googleCalendarPollTimer);
+  googleCalendarPollTimer = setTimeout(pollGoogleCalendar, Math.max(1000, delay));
+  googleCalendarPollTimer.unref?.();
+}
+
+async function requestGoogleCalendarEvents(range = googleCalendarRange()) {
+  const key=`${range.timeMin}|${range.timeMax}`;
+  if (googleCalendarRequests.has(key)) return googleCalendarRequests.get(key);
+  const request=googleCalendar.events(range.timeMin,range.timeMax);
+  googleCalendarRequests.set(key,request);
+  try { return await request; }
+  finally { googleCalendarRequests.delete(key); }
+}
+
+async function pollGoogleCalendar() {
+  if (!googleCalendar?.status().connected) { scheduleGoogleCalendarPoll(GOOGLE_IDLE_POLL_MS); return; }
+  const range = googleCalendarRange();
+  try {
+    const events = await requestGoogleCalendarEvents(range);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("google-calendar-auto-sync", { events, ...range, syncedAt:new Date().toISOString() });
+    scheduleGoogleCalendarPoll(hasUpcomingGoogleSessions(events) ? GOOGLE_ACTIVE_POLL_MS : GOOGLE_IDLE_POLL_MS);
+  } catch (error) {
+    log.warn("Google Calendar automatic sync failed:", error.message || error);
+    scheduleGoogleCalendarPoll(GOOGLE_RETRY_POLL_MS);
+  }
+}
 
 function showDueHabitNotifications(reminders = []) {
   const now = Date.now();
@@ -252,7 +302,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile("index.html");
-  mainWindow.webContents.on("did-finish-load", () => captureSnapshotFromWindow(mainWindow));
+  mainWindow.webContents.on("did-finish-load", () => { captureSnapshotFromWindow(mainWindow); scheduleGoogleCalendarPoll(1000); });
 }
 
 function openChildWindow(key, file, options) {
@@ -339,10 +389,10 @@ ipcMain.handle("request-app-close", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("google-calendar-status", () => googleCalendar.status());
-ipcMain.handle("google-calendar-configure", (_event, credentials) => googleCalendar.configure(credentials));
-ipcMain.handle("google-calendar-connect", () => googleCalendar.connect());
-ipcMain.handle("google-calendar-disconnect", () => googleCalendar.disconnect());
-ipcMain.handle("google-calendar-sync", (_event, range) => googleCalendar.events(range.timeMin, range.timeMax));
+ipcMain.handle("google-calendar-configure", (_event, credentials) => { const status=googleCalendar.configure(credentials);scheduleGoogleCalendarPoll(1000);return status; });
+ipcMain.handle("google-calendar-connect", async () => { const status=await googleCalendar.connect();scheduleGoogleCalendarPoll(1000);return status; });
+ipcMain.handle("google-calendar-disconnect", () => { const status=googleCalendar.disconnect();scheduleGoogleCalendarPoll(GOOGLE_IDLE_POLL_MS);return status; });
+ipcMain.handle("google-calendar-sync", async (_event, range) => { const events=await requestGoogleCalendarEvents(range);scheduleGoogleCalendarPoll(hasUpcomingGoogleSessions(events)?GOOGLE_ACTIVE_POLL_MS:GOOGLE_IDLE_POLL_MS);return events; });
 
 ipcMain.on("schedule-habit-notifications", (_event, reminders = []) => {
   showDueHabitNotifications(reminders);

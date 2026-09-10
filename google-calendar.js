@@ -20,6 +20,8 @@ class GoogleCalendar {
     this.filePath = filePath;
     this.onChanged = onChanged;
     this.state = {};
+    this.calendarTargets = null;
+    this.calendarTargetsExpireAt = 0;
     try { this.state = JSON.parse(require("fs").readFileSync(filePath, "utf8")); } catch {}
   }
 
@@ -37,7 +39,7 @@ class GoogleCalendar {
     const clientSecret = String(credentials.clientSecret || "").trim();
     if (!clientId.endsWith(".apps.googleusercontent.com")) throw new Error("El Client ID de Google no es valido");
     if (!clientSecret) throw new Error("Falta el Client secret de Google");
-    if (clientId !== this.state.clientId || clientSecret !== this.state.clientSecret) this.state = { clientId, clientSecret };
+    if (clientId !== this.state.clientId || clientSecret !== this.state.clientSecret) { this.state = { clientId, clientSecret }; this.calendarTargets=null;this.calendarTargetsExpireAt=0; }
     this.save();
     return this.status();
   }
@@ -81,12 +83,19 @@ class GoogleCalendar {
     return token.access_token;
   }
 
+  async eventCalendars(headers) {
+    if (this.calendarTargets && this.calendarTargetsExpireAt > Date.now()) return this.calendarTargets;
+    const calendarList = await requestJson("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250", { headers });
+    const focusmateCalendars = (calendarList.items || []).filter(calendar => /focusmate/i.test(`${calendar.summary || ""} ${calendar.summaryOverride || ""}`));
+    this.calendarTargets = focusmateCalendars.length ? focusmateCalendars : [{ id:"primary", summary:"Principal", filterEvents:true }];
+    this.calendarTargetsExpireAt = Date.now() + 15 * 60 * 1000;
+    return this.calendarTargets;
+  }
+
   async events(timeMin, timeMax) {
     const token = await this.accessToken();
     const headers = { authorization: `Bearer ${token}` };
-    const calendarList = await requestJson("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250", { headers });
-    const focusmateCalendars = (calendarList.items || []).filter(calendar => /focusmate/i.test(`${calendar.summary || ""} ${calendar.summaryOverride || ""}`));
-    const targets = focusmateCalendars.length ? focusmateCalendars : [{ id: "primary", summary: "Principal", filterEvents: true }];
+    const targets = await this.eventCalendars(headers);
     const params = new URLSearchParams({ timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "2500" });
     const groups = await Promise.all(targets.map(async calendar => {
       const data = await requestJson(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendar.id)}/events?${params}`, { headers });
@@ -98,7 +107,7 @@ class GoogleCalendar {
     return groups.flat();
   }
 
-  disconnect() { this.state = { clientId: this.state.clientId, clientSecret: this.state.clientSecret }; this.save(); return this.status(); }
+  disconnect() { this.state = { clientId: this.state.clientId, clientSecret: this.state.clientSecret }; this.calendarTargets=null;this.calendarTargetsExpireAt=0;this.save();return this.status(); }
 }
 
 module.exports = GoogleCalendar;
