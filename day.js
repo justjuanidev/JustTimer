@@ -28,7 +28,7 @@ const expandedTaskIds = new Set();
 
 function $(id) { return document.getElementById(id); }
 function readArray(key) { try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value : []; } catch { return []; } }
-function writeArray(key, value) { localStorage.setItem(key, JSON.stringify(value)); if (key === DAY_TASKS_KEY) syncDueTasksToToday(value); ipcRenderer.send("data-changed"); }
+function writeArray(key, value) { localStorage.setItem(key, JSON.stringify(value)); ipcRenderer.send("data-changed"); }
 function tasks() { return renderCache?.tasks || readArray(DAY_TASKS_KEY); }
 function projects() { return renderCache?.projects || readArray(PROJECTS_KEY); }
 function channels() { return renderCache?.channels || readArray(CHANNELS_KEY); }
@@ -104,19 +104,7 @@ function channelFor(project) {
 
 function readPriorityMap() { try { const value = JSON.parse(localStorage.getItem(DAILY_PRIORITIES_KEY) || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } }
 function syncDueTasksToToday(allTasks = tasks()) {
-  const date = todayKey(), map = readPriorityMap(), priorities = Array.isArray(map[date]) ? map[date] : [];
-  const byTask = new Map(priorities.filter(item => item.sourceDayTaskId).map(item => [item.sourceDayTaskId, item]));
-  const byId = new Map(priorities.map(item => [item.id, item]));
-  let taskChanged = false, priorityChanged = false;
-  allTasks.forEach(task => {
-    if (task.deleted || (task.dueDate !== date && task.dailyPriorityDate !== date)) return;
-    let record = (task.dailyPriorityId && byId.get(task.dailyPriorityId)) || byTask.get(task.id);
-    if (!record) { record = { id: task.dailyPriorityId || `priority-${date}-${task.id}`, text: task.text, sourceDayTaskId: task.id, createdAt: new Date().toISOString() }; priorities.push(record); byId.set(record.id, record); priorityChanged = true; }
-    if (record.text !== task.text) { record.text = task.text; priorityChanged = true; }
-    if (task.dailyPriorityDate !== date || task.dailyPriorityId !== record.id) { task.dailyPriorityDate = date; task.dailyPriorityId = record.id; taskChanged = true; }
-  });
-  if (priorityChanged) { map[date] = priorities; localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(map)); }
-  if (taskChanged) localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(allTasks));
+  return allTasks;
 }
 
 function projectStats(project) {
@@ -238,17 +226,17 @@ function renderTasks() {
     const sessionCount = new Set(task.sessionIds || []).size || Number(task.sessionCount) || 0;
     const completedAt = task.done && task.completedAt ? ` · Completada ${new Date(task.completedAt).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
     const effort = ` · ${sessionCount} ${sessionCount === 1 ? "sesión" : "sesiones"} · ${formatTaskDuration(task.focusedSecs)}${completedAt}`;
-    row.innerHTML = `<button class="todo-check" aria-label="Completar">${task.done ? "✓" : ""}</button><button class="subtask-toggle ${expanded ? "expanded" : ""}" title="${subtasks.length ? "Mostrar subtareas" : "Agregar subtarea"}">${expanded ? "▾" : "▸"}<small>${subtasks.length || "+"}</small></button><button class="todo-copy" type="button"><strong>${esc(task.text)}</strong><span><i class="category-dot ${task.category || "inbox"}"></i>${categoryLabel(task.category)}${due}${effort}</span></button><button class="priority-button" title="Cambiar prioridad">⚑</button><button class="session-button" title="Llevar a la sesión actual">→ sesión</button><button class="todo-delete" title="Eliminar">×</button>`;
+    row.innerHTML = `<button class="todo-check" aria-label="Completar">${task.done ? "✓" : ""}</button><button class="subtask-toggle ${expanded ? "expanded" : ""}" title="${subtasks.length ? "Mostrar subtareas" : "Agregar subtarea"}">${expanded ? "▾" : "▸"}<small>${subtasks.length || "+"}</small></button><button class="todo-copy" type="button"><strong>${esc(task.text)}</strong><span><i class="category-dot ${task.category || "inbox"}"></i>${categoryLabel(task.category)}${due}${effort}</span></button><button class="priority-button" title="Cambiar prioridad">⚑</button><button class="session-button" title="Asignar a próxima sesión disponible">→ próxima</button><button class="todo-delete" title="Eliminar">×</button>`;
     row.querySelector(".todo-check").addEventListener("click", () => updateTask(task.id, { done: !task.done, completedAt: !task.done ? new Date().toISOString() : null }));
     row.querySelector(".todo-copy").addEventListener("click", () => editTask(task));
     row.querySelector(".priority-button").addEventListener("click", () => { const values = ["low", "medium", "high"]; updateTask(task.id, { priority: values[(values.indexOf(task.priority || "medium") + 1) % values.length] }); });
-    row.querySelector(".session-button").addEventListener("click", () => importToSession(task));
+    row.querySelector(".session-button").addEventListener("click", () => assignToNextSessions(task));
     row.querySelector(".todo-delete").addEventListener("click", () => deleteTaskEverywhere(task.id));
     row.querySelector(".subtask-toggle").addEventListener("click", () => { expanded ? expandedTaskIds.delete(task.id) : expandedTaskIds.add(task.id); renderTasks(); });
     list.appendChild(row);
     const panel = document.createElement("div"); panel.className = `subtask-panel ${expanded ? "expanded" : ""}`;
-    panel.innerHTML = `<div class="subtask-list">${subtasks.map(subtask => `<article class="subtask-row ${subtask.done ? "done" : ""}" data-subtask-id="${esc(subtask.id)}"><button class="todo-check" data-subtask-check>${subtask.done ? "✓" : ""}</button><button class="subtask-copy" data-subtask-edit><strong>${esc(subtask.text)}</strong><span>${new Set(subtask.sessionIds || []).size} sesiones · ${formatTaskDuration(subtask.focusedSecs || 0)} trabajados</span></button><button class="session-button" data-subtask-session>→ sesión</button><button class="todo-delete" data-subtask-delete>×</button></article>`).join("")}</div><form class="subtask-add"><input maxlength="160" placeholder="Agregar subtarea" /><button type="submit">+</button></form>`;
-    panel.querySelectorAll("[data-subtask-id]").forEach(child => { const subtask = subtasks.find(item => item.id === child.dataset.subtaskId); child.querySelector("[data-subtask-check]").addEventListener("click", () => updateTask(subtask.id, { done:!subtask.done, completedAt:!subtask.done ? new Date().toISOString() : null })); child.querySelector("[data-subtask-edit]").addEventListener("click", () => editTask(subtask)); child.querySelector("[data-subtask-session]").addEventListener("click", () => importToSession(subtask)); child.querySelector("[data-subtask-delete]").addEventListener("click", () => deleteTaskEverywhere(subtask.id)); });
+    panel.innerHTML = `<div class="subtask-list">${subtasks.map(subtask => `<article class="subtask-row ${subtask.done ? "done" : ""}" data-subtask-id="${esc(subtask.id)}"><button class="todo-check" data-subtask-check>${subtask.done ? "✓" : ""}</button><button class="subtask-copy" data-subtask-edit><strong>${esc(subtask.text)}</strong><span>${new Set(subtask.sessionIds || []).size} sesiones · ${formatTaskDuration(subtask.focusedSecs || 0)} trabajados</span></button><button class="session-button" data-subtask-session>→ próxima</button><button class="todo-delete" data-subtask-delete>×</button></article>`).join("")}</div><form class="subtask-add"><input maxlength="160" placeholder="Agregar subtarea" /><button type="submit">+</button></form>`;
+    panel.querySelectorAll("[data-subtask-id]").forEach(child => { const subtask = subtasks.find(item => item.id === child.dataset.subtaskId); child.querySelector("[data-subtask-check]").addEventListener("click", () => updateTask(subtask.id, { done:!subtask.done, completedAt:!subtask.done ? new Date().toISOString() : null })); child.querySelector("[data-subtask-edit]").addEventListener("click", () => editTask(subtask)); child.querySelector("[data-subtask-session]").addEventListener("click", () => assignToNextSessions(subtask)); child.querySelector("[data-subtask-delete]").addEventListener("click", () => deleteTaskEverywhere(subtask.id)); });
     panel.querySelector(".subtask-add").addEventListener("submit", event => addSubtask(event, task));
     list.appendChild(panel);
   };
@@ -301,6 +289,26 @@ function importToSession(task) {
   writeArray(SESSIONS_KEY, readArray(SESSIONS_KEY).map(session => session.id === active.sessionId ? { ...session, tasks: sessionTasks } : session));
   writeArray(DAY_TASKS_KEY, tasks().map(item => item.id === task.id ? { ...item, sessionIds: [...new Set([...(item.sessionIds || []), active.sessionId])], sessionCount: new Set([...(item.sessionIds || []), active.sessionId]).size } : item));
   ipcRenderer.send("session-created"); alert("Tarea agregada a la sesión actual.");
+}
+
+function assignToNextSessions(task) {
+  const requested = window.prompt("¿A cuántas próximas sesiones querés asignarla?", "1");
+  if (requested === null) return;
+  const count = Math.max(1, Math.min(20, Number.parseInt(requested, 10) || 1));
+  const project = projects().find(item => item.id === task.projectId), channel = project ? projectWorkChannel(project) : (task.mode || mode);
+  const future = readArray(SESSIONS_KEY).filter(session => session.status === "pending" && new Date(session.startAt) > new Date() && (session.workArea || "personal") === channel).sort((a,b) => new Date(a.startAt)-new Date(b.startAt));
+  if (!future.length) { alert(`No hay sesiones futuras disponibles en ${workChannelInfo(channel)?.name || channel}.`); return; }
+  const selected = future.slice(0, count), selectedIds = new Set(selected.map(session => session.id));
+  const nextSessions = readArray(SESSIONS_KEY).map(session => {
+    if (!selectedIds.has(session.id)) return session;
+    const sessionTasks = Array.isArray(session.tasks) ? [...session.tasks] : [];
+    if (!sessionTasks.some(item => (item.projectTaskId || item.movedFromDayTaskId) === task.id)) sessionTasks.push({ id:uid(), projectTaskId:task.id, movedFromDayTaskId:task.id, text:task.text, notes:task.notes||"", priority:task.priority||"medium", done:false, deleted:false, focusedSecs:0, importedAt:new Date().toISOString() });
+    return { ...session, tasks:sessionTasks };
+  });
+  writeArray(SESSIONS_KEY, nextSessions);
+  writeArray(DAY_TASKS_KEY, tasks().map(item => item.id === task.id ? { ...item, sessionIds:[...new Set([...(item.sessionIds||[]), ...selectedIds])], sessionCount:new Set([...(item.sessionIds||[]), ...selectedIds]).size } : item));
+  ipcRenderer.send("session-created"); renderDetail();
+  alert(`Asignada a ${selected.length} ${selected.length === 1 ? "sesión" : "sesiones"}.`);
 }
 
 function updateProject(id, patch) { writeArray(PROJECTS_KEY, projects().map(project => project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)); projectId ? renderDetail() : renderLibrary(); }

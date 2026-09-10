@@ -132,6 +132,10 @@ body.tool-window {
 .tool-window .habit-dialog { color: #282c32; background: #fff; border: 1px solid #dfe3e8; box-shadow: 0 24px 70px rgba(16,24,40,.22); }
 .tool-window .habit-day span { color: #737984; background: #f0f2f5; }
 .tool-window .habit-day input:checked+span { color: #fff; background: #2563eb; }
+.tool-window .priority-plan,.tool-window .priority-picker,.tool-window .mini-card { color:#292d35; background:#fff; border-color:#e0e4e9; }
+.tool-window .priority-slot,.tool-window .priority-result { color:#292d35; background:#f7f8fa; border-color:#e5e8ec; }
+.tool-window .priority-slot:hover,.tool-window .priority-result:hover { background:#eef3fb; }
+.tool-window .priority-hint,.tool-window .priority-empty { color:#7a818c; }
 .tool-window .review-label { color: #686e78; }
 .tool-window .stats-kpi,.tool-window .stats-card,.tool-window .stats-energy-summary { background: #fff; border: 1px solid #e0e4e9; border-radius: 12px; box-shadow: 0 4px 15px rgba(16,24,40,.045); }
 .tool-window .stats-kpi span,.tool-window .energy-scale span { color: #747a84; }

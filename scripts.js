@@ -8,6 +8,9 @@ const PROJECTS_KEY = "justtimer.projects.v1";
 const WORK_CHANNELS_KEY = "justtimer.workChannels.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
+const HABITS_KEY = "justtimer.habits.v1";
+const HABIT_LOGS_KEY = "justtimer.habitLogs.v1";
+const MINI_CONTEXT_KEY = "justtimer.miniProjectContext.v1";
 const DEFAULT_DURATION_SECS = 75 * 60;
 
 const SKY_PHASES = [
@@ -226,34 +229,9 @@ function readDailyPriorities() {
 }
 
 function syncDueTasksToDailyPriorities() {
-  const date = todayKey();
-  const dayTasks = readJson(DAY_TASKS_KEY, []);
-  if (!Array.isArray(dayTasks)) return;
-  const map = readDailyPriorities();
-  const priorities = Array.isArray(map[date]) ? map[date] : [];
-  const byTask = new Map(priorities.filter(item => item.sourceDayTaskId).map(item => [item.sourceDayTaskId, item]));
-  const byId = new Map(priorities.map(item => [item.id, item]));
-  let taskChanged = false;
-  dayTasks.forEach(task => {
-    if (task.deleted || (task.dueDate !== date && task.dailyPriorityDate !== date)) return;
-    let record = (task.dailyPriorityId && byId.get(task.dailyPriorityId)) || byTask.get(task.id);
-    if (!record) {
-      record = { id: task.dailyPriorityId || `priority-${date}-${task.id}`, text: task.text, sourceDayTaskId: task.id, createdAt: new Date().toISOString() };
-      priorities.push(record);
-      byId.set(record.id, record);
-    } else {
-      record.text = task.text;
-      record.sourceDayTaskId = task.id;
-    }
-    if (task.dailyPriorityDate !== date || task.dailyPriorityId !== record.id) {
-      task.dailyPriorityDate = date;
-      task.dailyPriorityId = record.id;
-      taskChanged = true;
-    }
-  });
-  map[date] = priorities;
-  localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(map));
-  if (taskChanged) localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(dayTasks));
+  // Deadlines and daily priorities are deliberately independent. Older builds
+  // linked every task due today here; keeping this as a no-op prevents that data
+  // model from being reintroduced while remaining compatible with old calls.
 }
 
 function prioritiesForToday() {
@@ -262,8 +240,7 @@ function prioritiesForToday() {
 }
 
 function hasDailyPriorities() {
-  syncDueTasksToDailyPriorities();
-  return prioritiesForToday().length >= 3;
+  return prioritiesForToday().filter(item => (item.kind || "main") === "main").length >= 3;
 }
 
 function addDailyPriorityInput(value = "") {
@@ -343,6 +320,111 @@ function saveDailyPriorities() {
   ipcRenderer.send("data-changed");
   $("dailyPriorityError").classList.add("hidden");
   showPanel("panelSetup");
+}
+
+function resolvePriorityTask(item, tasks = readProjectTasks()) {
+  const taskId = item.taskId || item.sourceDayTaskId;
+  return tasks.find(task => (task.id === taskId || task.dailyPriorityId === item.id) && !task.deleted) || null;
+}
+
+function renderHomePriorities() {
+  const list = $("homePriorityList");
+  if (!list) return;
+  const tasks = readProjectTasks();
+  const items = prioritiesForToday().sort((a, b) => (Number(a.slot) || 99) - (Number(b.slot) || 99));
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = '<div class="home-item-empty">Elegí las tres cosas que harían exitoso el día.</div>';
+    return;
+  }
+  items.forEach((item, index) => {
+    const task = resolvePriorityTask(item, tasks);
+    const done = Boolean(task?.done || item.completedAt);
+    const row = document.createElement("div");
+    row.className = `home-item ${done ? "done" : ""} ${(item.kind === "additional" || index > 2) ? "additional" : ""}`;
+    row.innerHTML = `<button type="button" aria-label="${done ? "Reabrir" : "Completar"}">${done ? "✓" : ""}</button><span></span>`;
+    row.querySelector("span").textContent = task?.text || item.text || "Tarea eliminada";
+    row.querySelector("button").disabled = !task;
+    row.querySelector("button").addEventListener("click", () => togglePriorityTask(item, task, !done));
+    list.appendChild(row);
+  });
+}
+
+function togglePriorityTask(item, task, done) {
+  if (!task) return;
+  const completedAt = done ? new Date().toISOString() : null;
+  const nextTasks = readProjectTasks().map(entry => entry.id === task.id ? { ...entry, done, completedAt, updatedAt: new Date().toISOString() } : entry);
+  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(nextTasks));
+  const updateLinked = list => list.map(entry => linkedProjectTaskId(entry) === task.id ? { ...entry, done, completedAt } : entry);
+  writeTasks(updateLinked(readTasks()));
+  writeSessions(readSessions().map(session => ({ ...session, tasks: updateLinked(session.tasks || []) })));
+  const plan = readDailyPriorities();
+  plan[todayKey()] = (plan[todayKey()] || []).map(entry => entry.id === item.id ? { ...entry, completedAt } : entry);
+  localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(plan));
+  ipcRenderer.send("data-changed");
+  renderHomePriorities();
+}
+
+function currentHabitPhase(date = new Date()) {
+  const hour = date.getHours() + date.getMinutes() / 60;
+  if (hour >= 4 && hour < 12) return { id: "morning", label: "Mañana", range: "04:00–12:00" };
+  if (hour >= 12 && hour < 19) return { id: "afternoon", label: "Tarde", range: "12:00–19:00" };
+  return { id: "night", label: "Noche", range: "19:00–04:00" };
+}
+
+function habitIsDone(habit, logs) {
+  const log = logs[`${habit.id}:${todayKey()}`] || {};
+  return Boolean(log.justified || Number(log.count) >= Math.max(1, Number(habit.targetCount) || 1));
+}
+
+function renderHomeHabits() {
+  const phase = currentHabitPhase();
+  $("homeHabitPhase").textContent = phase.label;
+  $("homeHabitPhaseRange").textContent = phase.range;
+  const list = $("homeHabitList"), habits = readJson(HABITS_KEY, []), logs = readJson(HABIT_LOGS_KEY, {}), day = new Date().getDay();
+  const visible = (Array.isArray(habits) ? habits : []).filter(habit => !habit.archived && (!habit.days?.length || habit.days.includes(day)) && ((habit.kind === "phase" && habit.phase === phase.id) || habit.kind === "daily"));
+  list.innerHTML = "";
+  if (!visible.length) { list.innerHTML = '<div class="home-item-empty">No hay hábitos para este período.</div>'; return; }
+  visible.slice(0, 5).forEach(habit => {
+    const done = habitIsDone(habit, logs), row = document.createElement("div");
+    row.className = `home-item ${done ? "done" : ""}`;
+    row.innerHTML = `<button type="button">${done ? "✓" : ""}</button><span></span>`;
+    row.querySelector("span").textContent = habit.name;
+    row.querySelector("button").addEventListener("click", () => quickCompleteHabit(habit, done));
+    list.appendChild(row);
+  });
+}
+
+function quickCompleteHabit(habit, wasDone) {
+  const logs = readJson(HABIT_LOGS_KEY, {}), key = `${habit.id}:${todayKey()}`, current = logs[key] || { count: 0, events: [] }, at = new Date().toISOString();
+  logs[key] = { ...current, count: wasDone ? 0 : Math.max(1, Number(habit.targetCount) || 1), justified: false, updatedAt: at, events: [...(current.events || []), { at, type: wasDone ? "reopen" : "complete", source: "home" }] };
+  localStorage.setItem(HABIT_LOGS_KEY, JSON.stringify(logs));
+  ipcRenderer.send("data-changed");
+  renderHomeHabits();
+}
+
+function renderBetweenSessions() {
+  const card = $("homeGap"), next = getPendingSessions().find(session => new Date(session.startAt) > new Date());
+  if (!card || timerRunning || waiting || !next) { card?.classList.add("hidden"); return; }
+  const usableMinutes = Math.floor((new Date(next.startAt) - Date.now()) / 60000) - 1;
+  if (usableMinutes <= 1) {
+    card.classList.remove("hidden");
+    $("homeGapTitle").textContent = "Tu próxima sesión empieza en breve";
+    $("homeGapCopy").textContent = `${fmtHour(new Date(next.startAt))} · preparate con calma.`;
+    $("useGapBtn").classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden"); $("useGapBtn").classList.remove("hidden");
+  $("homeGapTitle").textContent = `Tenés ${usableMinutes} minutos libres`;
+  $("homeGapCopy").textContent = `Próxima sesión: ${next.projectName || next.workAreaName || "Focusmate"} · ${fmtHour(new Date(next.startAt))}. También podés descansar.`;
+  $("useGapBtn").dataset.nextStart = next.startAt;
+}
+
+function renderHome() {
+  renderHomePriorities();
+  renderHomeHabits();
+  renderBetweenSessions();
+  resizeWindow();
 }
 
 function readSessionTypes() {
@@ -636,6 +718,7 @@ function updateSessionSummary(pending = getPendingSessions()) {
       : "";
 
   renderNextSession(pending[0]);
+  renderBetweenSessions();
   const signature = pending.slice(0, 4).map(session => `${session.id}:${session.startAt}:${session.durationSecs}:${session.workArea}:${session.projectId}`).join("|");
   if (signature !== pendingSessionsSignature) {
     pendingSessionsSignature = signature;
@@ -1280,8 +1363,31 @@ $("closeBtn").addEventListener("click", () => {
   let habits = [], logs = {};
   try { habits = JSON.parse(localStorage.getItem("justtimer.habits.v1") || "[]"); logs = JSON.parse(localStorage.getItem("justtimer.habitLogs.v1") || "{}"); } catch {}
   const pending = habits.filter(habit => !habit.archived && (!habit.days?.length || habit.days.includes(day))).filter(habit => { const log = logs[`${habit.id}:${key}`] || {}; return !(log.justified || Number(log.count) >= Math.max(1, Number(habit.targetCount) || 1)); }).map(habit => `• ${habit.name}`);
-  ipcRenderer.invoke("request-app-close", pending);
+  const sessions = readSessions().filter(session => isSameDay(new Date(session.startAt), today) && session.status === "done");
+  const dayTasks = readProjectTasks();
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowItems = readDailyPriorities()[todayKey(tomorrow)] || [];
+  const summary = {
+    prioritiesDone: prioritiesForToday().slice(0, 3).filter(item => resolvePriorityTask(item, dayTasks)?.done || item.completedAt).length,
+    prioritiesTotal: Math.min(3, prioritiesForToday().filter(item => (item.kind || "main") === "main").length),
+    focusSecs: sessions.reduce((sum, session) => sum + Math.max(0, Number(session.durationSecs) || 0) - Math.max(0, Number(session.breakTotalSecs) || 0), 0),
+    tasksDone: dayTasks.filter(task => task.completedAt && isSameDay(new Date(task.completedAt), today)).length,
+    averageEnergy: sessions.filter(session => Number(session.energy)).reduce((acc, session, _, arr) => acc + Number(session.energy) / arr.length, 0),
+  };
+  ipcRenderer.invoke("request-app-close", { pendingHabits: pending, summary, tomorrowReady: tomorrowItems.filter(item => (item.kind || "main") === "main").length >= 3, tomorrowDate: todayKey(tomorrow) });
 });
+
+$("choosePrioritiesBtn").addEventListener("click", () => {
+  localStorage.setItem("justtimer.priorityTargetDate.v1", todayKey());
+  ipcRenderer.send("open-priorities");
+});
+$("manageHabitsBtn").addEventListener("click", openHabits);
+$("useGapBtn").addEventListener("click", event => {
+  localStorage.setItem(MINI_CONTEXT_KEY, JSON.stringify({ nextStartAt: event.currentTarget.dataset.nextStart || null, openedAt: new Date().toISOString() }));
+  ipcRenderer.send("data-changed");
+  ipcRenderer.send("open-mini-projects");
+});
+$("restGapBtn").addEventListener("click", () => $("homeGap").classList.add("hidden"));
 
 ipcRenderer.on("sessions-updated", updateSessionSummary);
 $("reviewWorkArea").addEventListener("change", event => {
@@ -1290,6 +1396,7 @@ $("reviewWorkArea").addEventListener("change", event => {
 window.addEventListener("focus", () => {
   updateSessionSummary();
   renderProjectSelects();
+  renderHome();
   if (!$("inlineTasksPanel").classList.contains("hidden")) renderInlineTasks();
 });
 window.addEventListener("storage", event => {
@@ -1317,7 +1424,12 @@ initResizeObserver();
 async function initializeApp() {
   reconcileProjectTaskHistory();
   showPanel("panelSetup");
+  renderHome();
   ipcRenderer.send("data-changed");
+  if (!hasDailyPriorities()) setTimeout(() => {
+    localStorage.setItem("justtimer.priorityTargetDate.v1", todayKey());
+    ipcRenderer.send("open-priorities");
+  }, 500);
 }
 
 initializeApp();

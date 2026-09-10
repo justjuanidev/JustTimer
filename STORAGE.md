@@ -18,12 +18,14 @@ El almacenamiento local conserva las claves versionadas siguientes:
 - `justtimer.sessions.v1`: sesiones e información usada para calcular estadísticas.
 - `justtimer.tasks.v1`: tareas de la sesión activa o pendientes para la siguiente sesión.
 - `justtimer.dayTasks.v1`: tareas generales y del día.
-- `justtimer.dailyPriorities.v1`: compatibilidad con prioridades guardadas de versiones anteriores.
+- `justtimer.dailyPriorities.v1`: plan histórico por fecha. Cada entrada referencia una tarea real de `dayTasks`, conserva su slot principal/adicional y una copia del texto para la revisión histórica. No se deriva de la fecha límite.
 - `justtimer.projects.v1`: proyectos.
 - `justtimer.projectChannels.v1`: secciones visuales para organizar videos.
 - `justtimer.workChannels.v1`: canales de trabajo personalizables, nombre y foto de perfil.
 - `justtimer.workArea.v1`: canal predeterminado para nuevas sesiones (`JustJuani` o `Laburo`).
 - `justtimer.habits.v1` y claves relacionadas: hábitos y registros.
+- `justtimer.miniProjects.v1` y `justtimer.miniProjectSessions.v1`: mini-proyectos opcionales, mínimo recomendado, notas de continuidad y tiempo acumulado.
+- `justtimer.miniProjectContext.v1`: próxima sesión usada para limitar el timer a un minuto antes de su inicio.
 - `justtimer.sessionTypes.v1`: tipos de sesión.
 - `justtimer.activeSession.v1`: recuperación de la sesión en curso.
 - Las demás claves `justtimer.*`: preferencias de interfaz y configuración.
@@ -58,6 +60,10 @@ una puede acumular tiempo, completarse y asignarse a sesiones de manera
 independiente. Las secciones de proyectos guardan `orientation` (`horizontal` o
 `vertical`) y los proyectos pueden cambiar de canal conservando sus tareas y el
 historial de sesiones asociado.
+
+Las prioridades del día nunca duplican la tarea: `taskId`/`sourceDayTaskId` apunta
+al registro original. Los tres slots principales no se rellenan automáticamente al
+completar una tarea; las prioridades adicionales solo se crean por acción explícita.
 
 La pantalla inicial crea únicamente sesiones del canal interno `routine`. El
 calendario funciona como vista semanal y planificador: la creación manual y el

@@ -12,6 +12,22 @@
   </div>
 
   <div class="panel" id="panelSetup">
+    <section class="home-card home-priorities" id="homePriorities">
+      <div class="home-card-head"><div><small>HOY</small><strong>Prioridades</strong></div><button class="home-link" id="choosePrioritiesBtn" type="button">Elegir</button></div>
+      <div class="home-list" id="homePriorityList"></div>
+    </section>
+
+    <section class="home-card home-habits" id="homeHabits">
+      <div class="home-card-head"><div><small id="homeHabitPhaseRange">HÁBITOS</small><strong id="homeHabitPhase">Ahora</strong></div><button class="home-link" id="manageHabitsBtn" type="button">Ver todos</button></div>
+      <div class="home-list" id="homeHabitList"></div>
+    </section>
+
+    <section class="home-card home-gap hidden" id="homeGap">
+      <div class="home-card-head"><div><small>ENTRE SESIONES</small><strong id="homeGapTitle">Tenés tiempo libre</strong></div></div>
+      <div class="home-gap-copy" id="homeGapCopy"></div>
+      <div class="home-gap-actions"><button class="home-primary" id="useGapBtn" type="button">Aprovechar este tiempo</button><button class="home-link" id="restGapBtn" type="button">Descansar</button></div>
+    </section>
+
     <div class="section-label setup-duration-title">&iquest;De cu&aacute;nto es la sesi&oacute;n?</div>
     <div class="btn-row" id="durRow">
       <button class="dur-btn" data-mins="25">25&prime;</button>

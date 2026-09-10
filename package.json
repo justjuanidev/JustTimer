@@ -1,6 +1,6 @@
 {
   "name": "justtimer",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "JustTimer - focus session timer",
   "author": "JustJuani",
   "main": "main.js",
@@ -19,6 +19,10 @@
       "calendar.html",
       "tasks.html",
       "habits.html",
+      "priorities.html",
+      "priorities.js",
+      "mini-projects.html",
+      "mini-projects.js",
       "stats.html",
       "day.html",
       "main.js",

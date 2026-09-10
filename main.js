@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const GoogleCalendar = require("./google-calendar");
 const { autoUpdater } = require("electron-updater");
-const DATA_SCHEMA_VERSION = 1;
+const DATA_SCHEMA_VERSION = 2;
 const DATA_ROOT = path.join(app.getPath("appData"), "JustTimerData");
 const STABLE_USER_DATA = path.join(DATA_ROOT, "User Data");
 const BACKUP_ROOT = path.join(DATA_ROOT, "Backups");
@@ -137,8 +137,26 @@ function showDueHabitNotifications(reminders = []) {
     const key = `${reminder.habitId}:${reminder.at}:${reminder.kind || "time"}`;
     if (notifiedHabitKeys.has(key) || at < now - 65000 || at > now) return;
     notifiedHabitKeys.add(key);
-    if (Notification.isSupported()) new Notification({ title: "JustTimer · Habito pendiente", body: reminder.body }).show();
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title: reminder.name || "JustTimer · Hábito pendiente", body: reminder.body });
+      notification.on("click", () => openHabitReminderActions(reminder));
+      notification.show();
+    }
   });
+}
+
+async function openHabitReminderActions(reminder) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const result = await dialog.showMessageBox(mainWindow, { type:"question", title:reminder.name || "Hábito pendiente", message:reminder.name || reminder.body, detail:"Podés resolverlo sin abrir el administrador.", buttons:["Hecho", "Recordarme en 15 min", "No lo voy a hacer", "Cancelar"], defaultId:0, cancelId:3 });
+  if (result.response === 0) {
+    await mainWindow.webContents.executeJavaScript(`(() => { const id=${JSON.stringify(reminder.habitId)}, now=new Date(), day=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-"); const habits=JSON.parse(localStorage.getItem("justtimer.habits.v1")||"[]"), habit=habits.find(h=>h.id===id), logs=JSON.parse(localStorage.getItem("justtimer.habitLogs.v1")||"{}"), key=id+":"+day, current=logs[key]||{count:0,events:[]}, at=now.toISOString(); logs[key]={...current,count:Math.max(1,Number(habit?.targetCount)||1),justified:false,updatedAt:at,events:[...(current.events||[]),{at,type:"complete",source:"notification"}]}; localStorage.setItem("justtimer.habitLogs.v1",JSON.stringify(logs)); })()`, true);
+    scheduleSnapshot(mainWindow); mainWindow.webContents.send("sessions-updated");
+  } else if (result.response === 1) {
+    const snoozed = { ...reminder, at:new Date(Date.now()+15*60000).toISOString(), kind:`snooze-${Date.now()}`, body:`${reminder.name || "El hábito"} sigue pendiente` };
+    setTimeout(() => showDueHabitNotifications([snoozed]), 15*60000);
+  } else if (result.response === 2) {
+    openChildWindow("habits", "habits.html", { width:860, height:650, minWidth:680, minHeight:520, resizable:true });
+  }
 }
 
 async function checkHabitNotifications() {
@@ -154,8 +172,8 @@ async function checkHabitNotifications() {
     (payload.habits || []).filter(habit => !habit.archived && (!habit.days?.length || habit.days.includes(now.getDay()))).forEach(habit => {
       const current = payload.logs?.[`${habit.id}:${dayKey}`] || {};
       if (current.justified || Number(current.count) >= Math.max(1, Number(habit.targetCount) || 1)) return;
-      (habit.reminderTimes || []).forEach(time => { const [hour, minute] = time.split(":").map(Number), at = new Date(now); at.setHours(hour, minute, 0, 0); reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" }); });
-      if (habit.kind === "phase" && habit.remindBeforePhaseEnd) { const ends = { morning: 12, afternoon: 19, night: 28 }, end = ends[habit.phase]; if (end) { const at = new Date(now); at.setHours(end % 24, 0, 0, 0); if (end >= 24) at.setDate(at.getDate() + 1); at.setMinutes(at.getMinutes() - 15); reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" }); } }
+      (habit.reminderTimes || []).forEach(time => { const [hour, minute] = time.split(":").map(Number), at = new Date(now); at.setHours(hour, minute, 0, 0); reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" }); });
+      if (habit.kind === "phase" && habit.remindBeforePhaseEnd) { const ends = { morning: 12, afternoon: 19, night: 28 }, end = ends[habit.phase]; if (end) { const at = new Date(now); at.setHours(end % 24, 0, 0, 0); if (end >= 24) at.setDate(at.getDate() + 1); at.setMinutes(at.getMinutes() - 15); reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" }); } }
     });
     showDueHabitNotifications(reminders);
   } catch (error) { log.warn("Habit notifications skipped:", error.message); }
@@ -285,14 +303,30 @@ ipcMain.on("close-app", () => {
   app.quit();
 });
 
-ipcMain.handle("request-app-close", async (_event, pendingHabits = []) => {
-  if (pendingHabits.length) {
-    const result = await dialog.showMessageBox(mainWindow, { type: "warning", title: "Habitos pendientes", message: `Antes de cerrar faltan ${pendingHabits.length} habitos`, detail: `${pendingHabits.slice(0, 8).join("\n")}\n\nCompletalos o deja una justificacion.`, buttons: ["Abrir habitos", "Seguir usando JustTimer"], defaultId: 0 });
-    if (result.response === 0) openChildWindow("habits", "habits.html", { width: 760, height: 620, resizable: true });
+ipcMain.handle("request-app-close", async (_event, payload = {}) => {
+  const pendingHabits = Array.isArray(payload) ? payload : (payload.pendingHabits || []);
+  const summary = payload.summary || {};
+  const hours = Math.floor((summary.focusSecs || 0) / 3600), minutes = Math.floor(((summary.focusSecs || 0) % 3600) / 60);
+  const detail = [
+    `🎯 Prioridades: ${summary.prioritiesDone || 0}/${summary.prioritiesTotal || 3}`,
+    `⏱ Foco: ${hours ? `${hours}h ` : ""}${minutes}m`,
+    `✓ Tareas: ${summary.tasksDone || 0}`,
+    summary.averageEnergy ? `⚡ Energía promedio: ${Number(summary.averageEnergy).toFixed(1)}` : null,
+    pendingHabits.length ? `\nHábitos pendientes (podés resolverlos mañana):\n${pendingHabits.slice(0, 5).join("\n")}` : null,
+  ].filter(Boolean).join("\n");
+  const tomorrowReady = Boolean(payload.tomorrowReady);
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: "info", title: "Día terminado", message: "Día terminado", detail,
+    buttons: tomorrowReady ? ["Cerrar JustTimer", "Seguir usando"] : ["Definir prioridades de mañana", "Dejar para mañana", "Seguir usando"],
+    defaultId: 0, cancelId: tomorrowReady ? 1 : 2,
+  });
+  if (!tomorrowReady && result.response === 0) {
+    await mainWindow.webContents.executeJavaScript(`localStorage.setItem("justtimer.priorityTargetDate.v1", ${JSON.stringify(payload.tomorrowDate || "")})`, true);
+    openChildWindow("priorities", "priorities.html", { width: 820, height: 680, minWidth: 680, minHeight: 560, resizable: true });
     return { closed: false };
   }
-  app.quit();
-  return { closed: true };
+  if ((tomorrowReady && result.response === 0) || (!tomorrowReady && result.response === 1)) { app.quit(); return { closed: true }; }
+  return { closed: false };
 });
 
 ipcMain.handle("google-calendar-status", () => googleCalendar.status());
@@ -340,6 +374,14 @@ ipcMain.handle("select-project-image", async event => {
 
 ipcMain.on("open-habits", () => {
   openChildWindow("habits", "habits.html", { width: 860, height: 650, minWidth: 680, minHeight: 520, resizable: true });
+});
+
+ipcMain.on("open-priorities", () => {
+  openChildWindow("priorities", "priorities.html", { width: 820, height: 680, minWidth: 680, minHeight: 560, resizable: true });
+});
+
+ipcMain.on("open-mini-projects", () => {
+  openChildWindow("mini-projects", "mini-projects.html", { width: 760, height: 650, minWidth: 620, minHeight: 520, resizable: true });
 });
 
 ipcMain.on("open-stats", () => {

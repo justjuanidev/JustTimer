@@ -142,13 +142,13 @@ function scheduleNotifications(habits, logs, now = new Date()) {
     (habit.reminderTimes || []).forEach(time => {
       const [hour, minute] = time.split(":").map(Number), at = new Date(now);
       at.setHours(hour, minute, 0, 0);
-      reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" });
+      reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" });
     });
     if (habit.kind === "phase" && habit.remindBeforePhaseEnd) {
       const endHour = PHASES[habit.phase]?.end;
       if (endHour) {
         const at = new Date(now); at.setHours(endHour % 24, 0, 0, 0); if (endHour >= 24) at.setDate(at.getDate() + 1); at.setMinutes(at.getMinutes() - 15);
-        reminders.push({ habitId: habit.id, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" });
+        reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" });
       }
     }
   });
@@ -186,7 +186,8 @@ function renderHabitList(list, habits, logs, overdueIds) {
       <button class="habit-small-btn justify" type="button" title="Justificar">!</button>
     `;
     row.querySelector(".habit-name").textContent = habit.name;
-    row.querySelector(".habit-meta").textContent = `${completionStatus(habit, logs)} · ${scheduleText(habit)}${log.difficulty ? ` · costo ${log.difficulty}/10` : ""}`;
+    const typeLabel = habit.habitType === "development" ? "desarrollo" : "rutina";
+    row.querySelector(".habit-meta").textContent = `${typeLabel} · ${completionStatus(habit, logs)} · ${scheduleText(habit)}${habit.habitType === "development" && log.difficulty ? ` · costo ${log.difficulty}/10` : ""}`;
     row.querySelector(".habit-main").addEventListener("click", () => {
       selectedHabitId = habit.id;
       renderHabitDetail(habit.id);
@@ -209,6 +210,7 @@ function openLogDialog(habit, mode) {
   $("habitLogNotes").value = "";
   $("habitDifficulty").value = "5";
   $("habitDifficultyReadout").textContent = "5 / 10";
+  $("habitDifficultyFields").classList.toggle("hidden", habit.habitType !== "development");
   $("habitLogDialog").showModal();
 }
 
@@ -224,7 +226,7 @@ function savePendingLog() {
     at: new Date().toISOString(),
     type: pendingLog.mode,
     notes: $("habitLogNotes").value.trim(),
-    difficulty: Number($("habitDifficulty").value),
+    difficulty: habit.habitType === "development" ? Number($("habitDifficulty").value) : null,
   };
   logs[key] = {
     ...current,
@@ -252,9 +254,9 @@ function renderHabitDetail(habitId) {
   const logs = readLogs();
   const stats = getStats(habit, logs);
   detail.classList.remove("hidden");
-  detail.innerHTML = `
+  const developmentStats = habit.habitType === "development" ? `
     <div class="side-title">${escapeHtml(habit.name)}</div>
-    <div class="side-meta">${escapeHtml(scheduleText(habit))}</div>
+    <div class="side-meta">Hábito de desarrollo · ${escapeHtml(scheduleText(habit))}</div>
     <div class="habit-stat-grid">
       <div><strong>${stats.monthDone}</strong><span>este mes</span></div>
       <div><strong>${stats.totalDone}</strong><span>total</span></div>
@@ -263,7 +265,13 @@ function renderHabitDetail(habitId) {
     </div>
     <div class="habit-month-dots">${monthDots(habit, logs)}</div>
     <div class="side-section">Historial</div>
-    <div class="habit-history">${historyMarkup(habit, logs)}</div>
+    <div class="habit-history">${historyMarkup(habit, logs)}</div>` : `
+    <div class="side-title">${escapeHtml(habit.name)}</div>
+    <div class="side-meta">Rutina · ${escapeHtml(scheduleText(habit))}</div>
+    <div class="side-copy">Las rutinas solo registran hecho, pendiente o justificado. Sin rachas ni gamificación.</div>
+    <div class="side-section">Historial reciente</div>
+    <div class="habit-history">${historyMarkup(habit, logs)}</div>`;
+  detail.innerHTML = `${developmentStats}
     <button class="tool-btn danger side-delete-btn" id="archiveHabitBtn">Archivar habito</button>
   `;
   $("archiveHabitBtn").addEventListener("click", () => archiveHabit(habit.id));
@@ -368,6 +376,7 @@ function buildDayButtons() {
 function openHabitForm() {
   $("habitNameInput").value = "";
   $("habitKindSelect").value = "phase";
+  $("habitTypeSelect").value = "routine";
   $("habitPhaseSelect").value = "morning";
   $("habitTargetInput").value = "1";
   $("habitReminderTimes").value = "";
@@ -387,6 +396,7 @@ function saveHabit(event) {
   habits.push({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name,
+    habitType: $("habitTypeSelect").value,
     kind,
     phase: kind === "phase" ? $("habitPhaseSelect").value : null,
     targetCount: Math.max(1, Number($("habitTargetInput").value) || 1),

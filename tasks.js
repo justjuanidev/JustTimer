@@ -69,41 +69,16 @@ function readDailyPriorityMap() {
 }
 
 function isTodayPriorityTask(task) {
-  const today = todayKey();
-  return !task.deleted && (task.dailyPriorityDate === today || task.dueDate === today);
+  const ids = new Set((readDailyPriorityMap()[todayKey()] || []).map(item => item.taskId || item.sourceDayTaskId).filter(Boolean));
+  return !task.deleted && ids.has(task.id);
 }
 
 function syncDailyPriorityRecords(allTasks = readDayTasks()) {
   const date = todayKey();
   const map = readDailyPriorityMap();
   const existing = Array.isArray(map[date]) ? map[date] : [];
-  const byTaskId = new Map(existing.filter(item => item.sourceDayTaskId).map(item => [item.sourceDayTaskId, item]));
-  const byPriorityId = new Map(existing.map(item => [item.id, item]));
-  let changedTasks = false;
-
-  allTasks.forEach(task => {
-    if (!isTodayPriorityTask(task)) return;
-    let priorityId = task.dailyPriorityId;
-    let record = (priorityId && byPriorityId.get(priorityId)) || byTaskId.get(task.id);
-    if (!record) {
-      priorityId = priorityId || `priority-${date}-${task.id}`;
-      record = { id: priorityId, text: task.text, sourceDayTaskId: task.id, createdAt: new Date().toISOString() };
-      existing.push(record);
-      byPriorityId.set(priorityId, record);
-    } else {
-      record.text = task.text;
-      record.sourceDayTaskId = task.id;
-    }
-    if (task.dailyPriorityDate !== date || task.dailyPriorityId !== record.id) {
-      task.dailyPriorityDate = date;
-      task.dailyPriorityId = record.id;
-      changedTasks = true;
-    }
-  });
-
-  map[date] = existing;
+  map[date] = existing.map(item => { const task = allTasks.find(entry => entry.id === (item.taskId || item.sourceDayTaskId)); return task ? { ...item, taskId:task.id, sourceDayTaskId:task.id, text:task.text, snapshotText:item.snapshotText || task.text } : item; });
   localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(map));
-  if (changedTasks) localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(allTasks));
   return allTasks;
 }
 
@@ -176,16 +151,22 @@ function makeTask(text) {
 }
 
 function makeTodayPriorityTask(text) {
-  const date = todayKey();
   return {
     ...makeTask(text),
     priority: "high",
     category: "actionable",
-    dueDate: date,
+    dueDate: null,
     mode: "work",
     projectId: null,
-    dailyPriorityDate: date,
   };
+}
+
+function addTaskToTodayPlan(task) {
+  const date = todayKey(), map = readDailyPriorityMap(), items = Array.isArray(map[date]) ? map[date] : [];
+  const usedMain = new Set(items.filter(item => (item.kind || "main") === "main").map(item => Number(item.slot)));
+  const free = [1, 2, 3].find(slot => !usedMain.has(slot));
+  items.push({ id:`priority-${date}-${task.id}`, taskId:task.id, sourceDayTaskId:task.id, text:task.text, snapshotText:task.text, kind:free ? "main" : "additional", slot:free || Math.max(3, ...items.map(item => Number(item.slot) || 0)) + 1, selectedAt:new Date().toISOString() });
+  map[date] = items; localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(map));
 }
 
 function addTask() {
@@ -194,7 +175,8 @@ function addTask() {
 
   if (activeView === "day") {
     const tasks = readDayTasks();
-    tasks.push(makeTodayPriorityTask(text));
+    const task = makeTodayPriorityTask(text); tasks.push(task);
+    addTaskToTodayPlan(task);
     writeDayTasks(tasks);
   } else {
     const tasks = readTasks();
