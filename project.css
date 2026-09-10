@@ -74,13 +74,21 @@ body.project-library-window {
 .light-select option,.status-select option { color: #272a30; background: #fff; }
 .light-select:focus,.status-select:focus { color: #272a30; background: #fff; border-color: #82aafa; box-shadow: 0 0 0 3px #e6efff; }
 .channel-list { display: flex; flex-direction: column; gap: 30px; padding-top: 25px; }
-.channel-section { min-width: 0; }
-.channel-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 13px; }
+.channel-section { min-width: 0; border-radius:14px; transition:opacity .15s,background .15s,outline-color .15s; }
+.channel-section.dragging-section { opacity:.42; }
+.channel-section.section-drop-target { outline:2px solid #77a7ff; outline-offset:7px; background:#f6f9ff; }
+.channel-heading { display: grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:8px; margin-bottom: 13px; }
+.channel-copy { min-width:0; }
 .channel-heading h2 { color: var(--ink); font-size: 17px; letter-spacing: -.25px; }
 .channel-heading p { margin-top: 4px; color: var(--muted); font-size: 10px; font-weight: 650; }
-.channel-edit { width: 29px; height: 29px; border-radius: 8px; color: #858a94; background: transparent; font-size: 14px; }
-.channel-edit:hover { color: #34373e; background: #f0f1f3; }
+.section-drag { width:28px; height:36px; border-radius:8px; color:#99a0ab; background:transparent; cursor:grab; font-size:16px; letter-spacing:-3px; }
+.section-drag:active { cursor:grabbing; }.section-drag:hover { color:#2864d7; background:#edf3ff; }
+.channel-actions { display:flex; align-items:center; gap:3px; }
+.channel-edit,.channel-archive,.channel-delete { width: 29px; height: 29px; border-radius: 8px; color: #858a94; background: transparent; font-size: 14px; }
+.channel-edit:hover,.channel-archive:hover { color: #34373e; background: #f0f1f3; }
+.channel-delete:hover { color:#c93636; background:#fff0f0; }
 .video-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 21px 14px; min-height: 70px; }
+.video-grid.project-drop-target { outline:2px dashed #8db2f4; outline-offset:6px; border-radius:10px; background:#f7faff; }
 .vertical-section .video-grid { grid-template-columns:repeat(6,minmax(0,1fr)); }
 .video-project-card { position: relative; min-width: 0; }
 .video-project-card.dragging { opacity: .38; transform: scale(.97); }

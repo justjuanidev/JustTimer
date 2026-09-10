@@ -1932,11 +1932,12 @@ body.main-window .close-btn {
 
 /* Lightweight weekly calendar: seven columns instead of 672 interactive slots. */
 .calendar-grid { display:flex; flex-direction:column; min-height:0; overflow:hidden; }
-.calendar-head-row { display:grid; grid-template-columns:52px repeat(7,minmax(98px,1fr)); min-width:738px; flex:none; background:#f7f8fa; }
+.calendar-week-content { width:100%; min-width:738px; }
+.calendar-head-row { position:sticky; top:0; z-index:12; display:grid; grid-template-columns:52px repeat(7,minmax(98px,1fr)); width:100%; background:#f7f8fa; }
 .calendar-head-row>div { height:34px; border-right:1px solid #e6e9ee; border-bottom:1px solid #dfe3e8; }
 .calendar-head-row .cal-day-head { display:flex; align-items:center; justify-content:center; padding:0; font-size:11px; font-weight:800; }
 .calendar-scroll { min-height:0; flex:1; overflow:auto; }
-.calendar-canvas { display:grid; grid-template-columns:52px repeat(7,minmax(98px,1fr)); min-width:738px; position:relative; }
+.calendar-canvas { display:grid; grid-template-columns:52px repeat(7,minmax(98px,1fr)); width:100%; position:relative; }
 .calendar-time-axis,.calendar-day-column { position:relative; height:2688px; }
 .calendar-time-axis { background:#fafbfc; border-right:1px solid #dfe3e8; }
 .calendar-time-label { position:absolute; right:7px; transform:translateY(-7px); color:#77808d; font-size:10px; }

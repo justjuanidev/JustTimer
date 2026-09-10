@@ -8,6 +8,7 @@ const TASKS_KEY = "justtimer.tasks.v1";
 const SESSIONS_KEY = "justtimer.sessions.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
 const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
+const SHORTS_SECTION_MIGRATION_KEY = "justtimer.shortsSectionCreated.v1";
 const STATUSES = [
   { id: "idea", label: "Idea", icon: "✦" }, { id: "framing", label: "Framing", icon: "▣" },
   { id: "packaging", label: "Packaging", icon: "◆" }, { id: "planning", label: "Plani", icon: "▤" },
@@ -18,7 +19,7 @@ const CATEGORIES = [{ id: "all", label: "Todas" }, { id: "inbox", label: "Inbox"
 
 let mode = localStorage.getItem("justtimer.workArea.v1") || localStorage.getItem("justtimer.taskMode.v1") || "personal";
 let projectId = null, statusFilter = "all", taskCategory = "all", showArchived = false;
-let selectedProjectImage = null, draggedProjectId = null;
+let selectedProjectImage = null, draggedProjectId = null, draggedChannelId = null;
 let selectedWorkChannelImage = null, editingWorkChannelId = null;
 let renderCache = null;
 let pendingEditorSave = null;
@@ -68,14 +69,14 @@ function renderWorkspaces() {
 
 function ensureChannels() {
   const all = channels();
-  const defaults = [
-    { id: "default-personal-videos", name: "Canal JustJuani", mode: "personal", order: 0 }
-  ];
   let changed = false;
-  defaults.forEach(item => { if (!all.some(channel => channel.id === item.id)) { all.push(item); changed = true; } });
+  if (!all.some(channel => channel.mode === "personal")) { all.push({ id: "default-personal-videos", name: "Canal JustJuani", mode: "personal", orientation:"horizontal", order: 0 }); changed = true; }
   const videos = all.find(channel => channel.id === "default-personal-videos");
   if (videos?.name === "Videos") { videos.name = "Canal JustJuani"; changed = true; }
-  if (!all.some(channel => channel.mode === "personal" && channel.name.toLowerCase() === "shorts")) { all.push({ id:"default-personal-shorts", name:"Shorts", mode:"personal", orientation:"vertical", order:all.filter(channel => channel.mode === "personal").length }); changed = true; }
+  if (!localStorage.getItem(SHORTS_SECTION_MIGRATION_KEY)) {
+    if (!all.some(channel => channel.mode === "personal" && channel.name.toLowerCase() === "shorts")) { all.push({ id:"default-personal-shorts", name:"Shorts", mode:"personal", orientation:"vertical", order:all.filter(channel => channel.mode === "personal").length }); changed = true; }
+    localStorage.setItem(SHORTS_SECTION_MIGRATION_KEY, "1");
+  }
   const legacyWorkIndex = all.findIndex(channel => channel.id === "default-work" || (channel.mode === "work" && channel.name === "Clientes"));
   if (legacyWorkIndex >= 0) {
     let replacement = all.find(channel => channel.mode === "work" && channel !== all[legacyWorkIndex]);
@@ -130,7 +131,7 @@ function renderStatusFilters() {
   $("statusFilters").querySelectorAll("[data-status]").forEach(button => button.addEventListener("click", () => { statusFilter = button.dataset.status; renderLibrary(); }));
 }
 function renderProjectFormOptions() {
-  const available = ensureChannels().filter(item => item.mode === mode).sort((a, b) => (a.order || 0) - (b.order || 0));
+  const available = ensureChannels().filter(item => item.mode === mode && !item.archived).sort((a, b) => (a.order || 0) - (b.order || 0));
   $("projectChannel").innerHTML = available.map(channel => `<option value="${channel.id}">${esc(channel.name)}</option>`).join("");
   $("projectStatus").innerHTML = STATUSES.map(status => `<option value="${status.id}">${status.label}</option>`).join("");
 }
@@ -166,19 +167,34 @@ function renderLibrary() {
   $("archivedProjectsBtn").textContent = showArchived ? "↩" : "🗂️";
   $("archivedProjectsBtn").title = showArchived ? "Volver a videos activos" : "Ver archivados";
   const root = $("projectChannels"); root.innerHTML = "";
-  ensureChannels().filter(channel => channel.mode === mode).sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(channel => {
-    const items = projects().filter(project => projectWorkChannel(project) === mode && channelFor(project)?.id === channel.id && Boolean(project.archived) === showArchived && (statusFilter === "all" || (project.status || "idea") === statusFilter)).sort((a, b) => (a.order ?? 999999) - (b.order ?? 999999));
-    if (!items.length && (statusFilter !== "all" || showArchived)) return;
-    const channelProjects = projects().filter(project => projectWorkChannel(project) === mode && channelFor(project)?.id === channel.id && !project.archived);
+  const allProjects = projects();
+  const visibleChannels = ensureChannels().filter(channel => {
+    if (channel.mode !== mode) return false;
+    if (!showArchived) return !channel.archived;
+    return Boolean(channel.archived) || allProjects.some(project => projectWorkChannel(project) === mode && channelFor(project)?.id === channel.id && project.archived);
+  }).sort((a, b) => (a.order || 0) - (b.order || 0));
+  visibleChannels.forEach(channel => {
+    const items = allProjects.filter(project => projectWorkChannel(project) === mode && channelFor(project)?.id === channel.id && (showArchived ? (channel.archived || project.archived) : !project.archived) && (statusFilter === "all" || (project.status || "idea") === statusFilter)).sort((a, b) => (a.order ?? 999999) - (b.order ?? 999999));
+    if (!items.length && (statusFilter !== "all" || (showArchived && !channel.archived))) return;
+    const channelProjects = allProjects.filter(project => projectWorkChannel(project) === mode && channelFor(project)?.id === channel.id && !project.archived);
     const totalHours = channelProjects.reduce((sum, project) => sum + projectStats(project).hours, 0);
     const section = document.createElement("section"); section.className = `channel-section ${channel.orientation === "vertical" ? "vertical-section" : ""}`; section.dataset.channelId = channel.id;
-    section.innerHTML = `<div class="channel-heading"><div><h2>${esc(channel.name)}</h2><p>${channelProjects.length} proyectos · ${totalHours.toFixed(1)} horas enfocadas</p></div><button class="channel-edit" title="Renombrar sección">✎</button></div><div class="video-grid"></div>`;
+    section.innerHTML = `<div class="channel-heading"><button class="section-drag" type="button" draggable="true" title="Arrastrar para reordenar" aria-label="Reordenar ${esc(channel.name)}">⋮⋮</button><div class="channel-copy"><h2>${esc(channel.name)}</h2><p>${channelProjects.length} proyectos · ${totalHours.toFixed(1)} horas enfocadas</p></div><div class="channel-actions"><button class="channel-edit" title="Renombrar sección">✎</button><button class="channel-archive" title="${channel.archived ? "Restaurar sección" : "Archivar sección"}">${channel.archived ? "↩" : "▣"}</button><button class="channel-delete" title="Eliminar sección">×</button></div></div><div class="video-grid"></div>`;
     section.querySelector(".channel-edit").addEventListener("click", () => renameChannel(channel.id));
+    section.querySelector(".channel-archive").addEventListener("click", () => archiveChannel(channel.id));
+    section.querySelector(".channel-delete").addEventListener("click", () => deleteChannel(channel.id));
+    const dragHandle = section.querySelector(".section-drag");
+    dragHandle.addEventListener("dragstart", event => { draggedChannelId = channel.id; section.classList.add("dragging-section"); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", channel.id); });
+    dragHandle.addEventListener("dragend", () => { draggedChannelId = null; section.classList.remove("dragging-section"); document.querySelectorAll(".section-drop-target").forEach(item => item.classList.remove("section-drop-target")); });
+    section.addEventListener("dragover", event => { if (!draggedChannelId) return; event.preventDefault(); section.classList.add("section-drop-target"); });
+    section.addEventListener("dragleave", event => { if (!section.contains(event.relatedTarget)) section.classList.remove("section-drop-target"); });
+    section.addEventListener("drop", event => { if (!draggedChannelId) return; event.preventDefault(); event.stopPropagation(); section.classList.remove("section-drop-target"); reorderChannel(draggedChannelId, channel.id); });
     const grid = section.querySelector(".video-grid"); items.forEach(project => grid.appendChild(projectCard(project, channel.orientation)));
     if (!items.length) grid.innerHTML = `<button class="empty-channel" type="button">+ Agregar el primer proyecto a ${esc(channel.name)}</button>`;
     grid.querySelector(".empty-channel")?.addEventListener("click", () => openProjectForm(channel.id));
-    grid.addEventListener("dragover", event => event.preventDefault());
-    grid.addEventListener("drop", event => { if (event.target === grid) { event.preventDefault(); moveProjectToChannel(draggedProjectId, channel.id); } });
+    grid.addEventListener("dragover", event => { if (draggedProjectId) { event.preventDefault(); grid.classList.add("project-drop-target"); } });
+    grid.addEventListener("dragleave", event => { if (!grid.contains(event.relatedTarget)) grid.classList.remove("project-drop-target"); });
+    grid.addEventListener("drop", event => { grid.classList.remove("project-drop-target"); if (draggedProjectId && event.target === grid) { event.preventDefault(); moveProjectToChannel(draggedProjectId, channel.id); } });
     root.appendChild(section);
   });
   if (!root.children.length) root.innerHTML = '<div class="library-empty"><span>⌕</span><h2>No hay videos en este filtro</h2><p>Probá con otro estado o volvé a ver los videos activos.</p></div>';
@@ -316,8 +332,38 @@ function reorderProject(sourceId, targetId, channelId) {
   writeArray(PROJECTS_KEY, all); renderLibrary();
 }
 function moveProjectToChannel(id, channelId) { if (id) updateProject(id, { channelId, order: projects().filter(project => project.channelId === channelId).length }); }
+function reorderChannel(sourceId, targetId) {
+  if (!sourceId || sourceId === targetId) return;
+  const all = channels(), source = all.find(item => item.id === sourceId), target = all.find(item => item.id === targetId);
+  if (!source || !target || source.mode !== target.mode) return;
+  const ordered = all.filter(item => item.mode === source.mode && item.id !== sourceId).sort((a,b) => (a.order ?? 999999) - (b.order ?? 999999));
+  ordered.splice(Math.max(0, ordered.findIndex(item => item.id === targetId)), 0, source);
+  ordered.forEach((item, order) => { item.order = order; });
+  writeArray(CHANNELS_KEY, all); renderLibrary();
+}
+function archiveChannel(id) {
+  const current = channels().find(item => item.id === id); if (!current) return;
+  writeArray(CHANNELS_KEY, channels().map(item => item.id === id ? { ...item, archived:!current.archived, archivedAt:!current.archived ? new Date().toISOString() : null } : item));
+  renderLibrary();
+}
+function deleteChannel(id) {
+  const allChannels = channels(), current = allChannels.find(item => item.id === id); if (!current) return;
+  const affected = projects().filter(project => channelFor(project)?.id === id);
+  if (!window.confirm(`¿Eliminar la sección “${current.name}”?${affected.length ? ` Sus ${affected.length} proyecto${affected.length === 1 ? "" : "s"} se moverán a otra sección.` : ""}`)) return;
+  let fallback = allChannels.filter(item => item.mode === current.mode && item.id !== id && !item.archived).sort((a,b) => (a.order || 0) - (b.order || 0))[0];
+  if (!fallback) { fallback = { id:`section-${uid()}`, name:"General", mode:current.mode, orientation:"horizontal", order:0, createdAt:new Date().toISOString() }; allChannels.push(fallback); }
+  const remaining = allChannels.filter(item => item.id !== id);
+  remaining.filter(item => item.mode === current.mode).sort((a,b) => (a.order || 0) - (b.order || 0)).forEach((item, order) => { item.order = order; });
+  const fallbackCount = projects().filter(project => project.channelId === fallback.id).length;
+  writeArray(CHANNELS_KEY, remaining);
+  if (affected.length) {
+    const affectedOrder = new Map(affected.map((project, index) => [project.id, fallbackCount + index]));
+    writeArray(PROJECTS_KEY, projects().map(project => affectedOrder.has(project.id) ? { ...project, channelId:fallback.id, order:affectedOrder.get(project.id) } : project));
+  }
+  renderLibrary();
+}
 function fillMoveProjectSections(workChannelId, selectedId = "") {
-  const available = ensureChannels().filter(channel => channel.mode === workChannelId).sort((a,b) => (a.order || 0) - (b.order || 0));
+  const available = ensureChannels().filter(channel => channel.mode === workChannelId && !channel.archived).sort((a,b) => (a.order || 0) - (b.order || 0));
   $("moveProjectSection").innerHTML = available.map(channel => `<option value="${esc(channel.id)}">${esc(channel.name)}</option>`).join("");
   $("moveProjectSection").value = available.some(channel => channel.id === selectedId) ? selectedId : (available[0]?.id || "");
 }

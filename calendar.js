@@ -262,7 +262,7 @@ function renderCalendar() {
     const start = new Date(session.startAt), key = dateKey(start);
     if (!Number.isNaN(start.getTime()) && visibleKeys.has(key)) byDay.get(key).push({ session, start });
   });
-  grid.innerHTML = `<div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head">${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</div>`).join("")}</div><div class="calendar-scroll"><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div>`;
+  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head">${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
   days.forEach(day => {
     const column = grid.querySelector(`[data-calendar-day="${dateKey(day)}"]`);
     (byDay.get(dateKey(day)) || []).sort((a, b) => a.start - b.start).forEach(({ session, start }) => {
