@@ -49,6 +49,12 @@ próxima sesión o permanecer en `justtimer.tasks.v1`.
   por canal. El canal interno `routine` se muestra como “Personal”, usa una J como
   avatar y participa en calendario/estadísticas, pero se oculta de la biblioteca
   de Videos.
+- `justtimer.weeklyPlans.v1`: plan histórico indexado por el lunes de cada semana.
+  Guarda solamente la configuración elegida (objetivo global de sesiones, ritmo
+  diario orientativo, días previstos, enfoque, foco principal y distribución por
+  canal). Las sesiones, minutos, energía y resultados siguen calculándose desde
+  `justtimer.sessions.v1`. Las ediciones de una semana iniciada conservan hasta 20
+  configuraciones anteriores dentro de `revisions`.
 
 El calendario incluye una lista lateral de tareas pendientes de los videos. Al
 asignar una tarea a una sesión conserva el mismo `projectTaskId`, por lo que su
@@ -69,6 +75,15 @@ una puede acumular tiempo, completarse y asignarse a sesiones de manera
 independiente. Las secciones de proyectos guardan `orientation` (`horizontal` o
 `vertical`) y los proyectos pueden cambiar de canal conservando sus tareas y el
 historial de sesiones asociado.
+
+Las tareas de proyecto pueden guardar `order` y `estimatedSessions`. El orden se
+modifica arrastrando y la estimación es orientativa: el progreso real continúa
+derivándose de los `sessionIds` vinculados y puede superar el valor estimado.
+También pueden guardar `activateDate`, `activateToCategory` y una lista
+`blockedByTaskIds`. Una tarea en Snooze o Incubadora se activa cuando se cumple la
+fecha y, si tiene dependencias, cuando todas están completadas. Los movimientos
+automáticos conservan un historial breve en `activationHistory`; no crean tareas
+ni estadísticas duplicadas.
 
 Las prioridades del día nunca duplican la tarea: `taskId`/`sourceDayTaskId` apunta
 al registro original. Los tres slots principales no se rellenan automáticamente al

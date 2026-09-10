@@ -20,7 +20,7 @@ const CATEGORIES = [{ id: "all", label: "Todas" }, { id: "inbox", label: "Inbox"
 
 let mode = localStorage.getItem("justtimer.workArea.v1") || localStorage.getItem("justtimer.taskMode.v1") || "personal";
 let projectId = null, statusFilter = "all", taskCategory = "all", showArchived = false;
-let selectedProjectImage = null, draggedProjectId = null, draggedChannelId = null;
+let selectedProjectImage = null, draggedProjectId = null, draggedChannelId = null, draggedTaskId = null;
 let selectedWorkChannelImage = null, editingWorkChannelId = null;
 let renderCache = null;
 let pendingEditorSave = null;
@@ -43,6 +43,26 @@ function statusInfo(id) { return STATUSES.find(item => item.id === id) || STATUS
 function categoryLabel(value) { return CATEGORIES.find(item => item.id === value)?.label || "Inbox"; }
 function formatTaskDuration(secs) { const safe = Math.max(0, Math.floor(Number(secs) || 0)), h = Math.floor(safe / 3600), m = Math.floor((safe % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min`; }
 function todayKey(date = new Date()) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
+
+function promoteReadyTasks(allTasks, nowKey = todayKey()) {
+  const byId=new Map(allTasks.map(task=>[task.id,task])); let changed=false;
+  const next=allTasks.map(task=>{
+    if (task.deleted || task.done || task.automationResolvedAt || !["snooze","incubator"].includes(task.category)) return task;
+    const dependencies=Array.isArray(task.blockedByTaskIds)?task.blockedByTaskIds.filter(id=>id!==task.id):[];
+    const hasDate=Boolean(task.activateDate), dateReady=!hasDate || task.activateDate<=nowKey;
+    const hasDependencies=dependencies.length>0, dependenciesReady=!hasDependencies || dependencies.every(id=>{const source=byId.get(id);return !source || source.done || source.deleted;});
+    if (!(hasDate||hasDependencies) || !dateReady || !dependenciesReady) return task;
+    const activatedAt=new Date().toISOString(), activationReason=hasDate&&hasDependencies?"date-and-dependencies":hasDate?"date":"dependencies";
+    changed=true; return {...task,category:task.activateToCategory==="incubator"?"incubator":"actionable",activatedAt,activationReason,automationResolvedAt:activatedAt,activationHistory:[...(task.activationHistory||[]),{activatedAt,activationReason,fromCategory:task.category,toCategory:task.activateToCategory==="incubator"?"incubator":"actionable"}].slice(-10)};
+  });
+  return {tasks:next,changed};
+}
+
+function applyTaskAutomations() {
+  const current=readArray(DAY_TASKS_KEY), promoted=promoteReadyTasks(current);
+  if (promoted.changed) writeArray(DAY_TASKS_KEY,promoted.tasks);
+  return promoted.changed;
+}
 
 function ensureWorkChannels() {
   const all = workChannels();
@@ -218,27 +238,36 @@ function renderTasks() {
   const list = $("dayTaskList");
   const projectTasks = tasks().filter(task => !task.deleted && task.projectId === projectId);
   const filtered = projectTasks.filter(task => !task.parentTaskId && (taskCategory === "all" || task.category === taskCategory));
-  const pending = filtered.filter(task => !task.done).sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")));
+  const pending = filtered.filter(task => !task.done).sort((a, b) => (a.order ?? 999999) - (b.order ?? 999999) || new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   const completed = filtered.filter(task => task.done).sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0));
   list.innerHTML = "";
   if (!filtered.length) { list.innerHTML = '<div class="todo-empty"><span>✓</span><strong>Todo despejado</strong><p>Agregá la próxima acción para este proyecto.</p></div>'; return; }
   const appendTask = task => {
     const subtasks = projectTasks.filter(item => item.parentTaskId === task.id).sort((a,b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)), expanded = expandedTaskIds.has(task.id);
-    const row = document.createElement("article"); row.className = `todo-row ${task.done ? "done" : ""} priority-${task.priority || "medium"}`;
+    const row = document.createElement("article"); row.className = `todo-row ${task.done ? "done" : ""} priority-${task.priority || "medium"}`; row.dataset.taskId = task.id; row.draggable = !task.done;
     const due = task.dueDate ? ` · <b class="${isOverdue(task) ? "overdue" : ""}">${taskDateLabel(task.dueDate)}</b>` : "";
     const sessionCount = new Set(task.sessionIds || []).size || Number(task.sessionCount) || 0;
     const completedAt = task.done && task.completedAt ? ` · Completada ${new Date(task.completedAt).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
-    const effort = ` · ${sessionCount} ${sessionCount === 1 ? "sesión" : "sesiones"} · ${formatTaskDuration(task.focusedSecs)}${completedAt}`;
-    row.innerHTML = `<button class="todo-check" aria-label="Completar">${task.done ? "✓" : ""}</button><button class="subtask-toggle ${expanded ? "expanded" : ""}" title="${subtasks.length ? "Mostrar subtareas" : "Agregar subtarea"}">${expanded ? "▾" : "▸"}<small>${subtasks.length || "+"}</small></button><button class="todo-copy" type="button"><strong>${esc(task.text)}</strong><span><i class="category-dot ${task.category || "inbox"}"></i>${categoryLabel(task.category)}${due}${effort}</span></button><button class="priority-button" title="Cambiar prioridad">⚑</button><button class="session-button" title="Asignar a próxima sesión disponible">→ próxima</button><button class="todo-delete" title="Eliminar">×</button>`;
+    const estimated = Math.max(0, Number(task.estimatedSessions) || 0);
+    const sessionLabel = estimated ? `${sessionCount}/${estimated} sesiones` : `${sessionCount} ${sessionCount === 1 ? "sesión" : "sesiones"}`;
+    const dependencies=(task.blockedByTaskIds||[]).filter(id=>projectTasks.some(item=>item.id===id&&!item.deleted));
+    const automation = task.activateDate ? ` · Activa ${taskDateLabel(task.activateDate)}` : dependencies.length ? ` · Depende de ${dependencies.length}` : "";
+    const effort = ` · ${sessionLabel} · ${formatTaskDuration(task.focusedSecs)}${automation}${completedAt}`;
+    row.innerHTML = `<button class="task-drag-handle" type="button" title="Arrastrar para cambiar el orden">⋮⋮</button><button class="todo-check" aria-label="Completar">${task.done ? "✓" : ""}</button><button class="subtask-toggle ${expanded ? "expanded" : ""}" title="${subtasks.length ? "Mostrar subtareas" : "Agregar subtarea"}">${expanded ? "▾" : "▸"}<small>${subtasks.length || "+"}</small></button><button class="todo-copy" type="button"><strong>${esc(task.text)}</strong><span><i class="category-dot ${task.category || "inbox"}"></i>${categoryLabel(task.category)}${due}${effort}</span></button><button class="priority-button" title="Cambiar prioridad">⚑</button><button class="session-button" title="Asignar a próxima sesión disponible">→ próxima</button><button class="todo-delete" title="Eliminar">×</button>`;
     row.querySelector(".todo-check").addEventListener("click", () => updateTask(task.id, { done: !task.done, completedAt: !task.done ? new Date().toISOString() : null }));
     row.querySelector(".todo-copy").addEventListener("click", () => editTask(task));
     row.querySelector(".priority-button").addEventListener("click", () => { const values = ["low", "medium", "high"]; updateTask(task.id, { priority: values[(values.indexOf(task.priority || "medium") + 1) % values.length] }); });
     row.querySelector(".session-button").addEventListener("click", () => assignToNextSessions(task));
     row.querySelector(".todo-delete").addEventListener("click", () => deleteTaskEverywhere(task.id));
     row.querySelector(".subtask-toggle").addEventListener("click", () => { expanded ? expandedTaskIds.delete(task.id) : expandedTaskIds.add(task.id); renderTasks(); });
+    row.addEventListener("dragstart", event => { if (task.done) return event.preventDefault(); draggedTaskId = task.id; row.classList.add("dragging-task"); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", task.id); });
+    row.addEventListener("dragend", () => { draggedTaskId = null; row.classList.remove("dragging-task"); document.querySelectorAll(".task-drop-target").forEach(item => item.classList.remove("task-drop-target")); });
+    row.addEventListener("dragover", event => { if (!draggedTaskId || task.done || draggedTaskId === task.id) return; event.preventDefault(); row.classList.add("task-drop-target"); });
+    row.addEventListener("dragleave", event => { if (!row.contains(event.relatedTarget)) row.classList.remove("task-drop-target"); });
+    row.addEventListener("drop", event => { if (!draggedTaskId || task.done) return; event.preventDefault(); row.classList.remove("task-drop-target"); reorderTask(draggedTaskId, task.id); });
     list.appendChild(row);
     const panel = document.createElement("div"); panel.className = `subtask-panel ${expanded ? "expanded" : ""}`;
-    panel.innerHTML = `<div class="subtask-list">${subtasks.map(subtask => `<article class="subtask-row ${subtask.done ? "done" : ""}" data-subtask-id="${esc(subtask.id)}"><button class="todo-check" data-subtask-check>${subtask.done ? "✓" : ""}</button><button class="subtask-copy" data-subtask-edit><strong>${esc(subtask.text)}</strong><span>${new Set(subtask.sessionIds || []).size} sesiones · ${formatTaskDuration(subtask.focusedSecs || 0)} trabajados</span></button><button class="session-button" data-subtask-session>→ próxima</button><button class="todo-delete" data-subtask-delete>×</button></article>`).join("")}</div><form class="subtask-add"><input maxlength="160" placeholder="Agregar subtarea" /><button type="submit">+</button></form>`;
+    panel.innerHTML = `<div class="subtask-list">${subtasks.map(subtask => { const count=new Set(subtask.sessionIds||[]).size,estimate=Math.max(0,Number(subtask.estimatedSessions)||0); return `<article class="subtask-row ${subtask.done ? "done" : ""}" data-subtask-id="${esc(subtask.id)}"><button class="todo-check" data-subtask-check>${subtask.done ? "✓" : ""}</button><button class="subtask-copy" data-subtask-edit><strong>${esc(subtask.text)}</strong><span>${count}${estimate?`/${estimate}`:""} sesiones · ${formatTaskDuration(subtask.focusedSecs || 0)} trabajados</span></button><button class="session-button" data-subtask-session>→ próxima</button><button class="todo-delete" data-subtask-delete>×</button></article>`; }).join("")}</div><form class="subtask-add"><input maxlength="160" placeholder="Agregar subtarea" /><button type="submit">+</button></form>`;
     panel.querySelectorAll("[data-subtask-id]").forEach(child => { const subtask = subtasks.find(item => item.id === child.dataset.subtaskId); child.querySelector("[data-subtask-check]").addEventListener("click", () => updateTask(subtask.id, { done:!subtask.done, completedAt:!subtask.done ? new Date().toISOString() : null })); child.querySelector("[data-subtask-edit]").addEventListener("click", () => editTask(subtask)); child.querySelector("[data-subtask-session]").addEventListener("click", () => assignToNextSessions(subtask)); child.querySelector("[data-subtask-delete]").addEventListener("click", () => deleteTaskEverywhere(subtask.id)); });
     panel.querySelector(".subtask-add").addEventListener("submit", event => addSubtask(event, task));
     list.appendChild(panel);
@@ -261,8 +290,9 @@ function addSubtask(event, parent) {
 function addTask(event) {
   event.preventDefault(); const text = $("newTaskInput").value.trim(); if (!text || !projectId) return;
   const selectedCategory = taskCategory === "all" ? $("newTaskCategory").value : taskCategory, all = tasks();
-  all.push({ id: uid(), text, done: false, notes: "", priority: "medium", deleted: false, category: selectedCategory, dueDate: $("newTaskDue").value || null, mode, projectId, createdAt: new Date().toISOString() });
-  writeArray(DAY_TASKS_KEY, all); $("newTaskInput").value = ""; $("newTaskDue").value = ""; renderDetail();
+  const estimatedSessions = Math.max(0, Math.round(Number($("newTaskEstimate").value) || 0));
+  all.push({ id: uid(), text, done: false, notes: "", priority: "medium", deleted: false, category: selectedCategory, dueDate: $("newTaskDue").value || null, estimatedSessions:estimatedSessions || null, order:all.filter(task => !task.deleted && !task.parentTaskId && task.projectId === projectId).length, mode, projectId, createdAt: new Date().toISOString() });
+  writeArray(DAY_TASKS_KEY, all); $("newTaskInput").value = ""; $("newTaskDue").value = ""; $("newTaskEstimate").value = ""; renderDetail();
 }
 function taskDateLabel(date) {
   const due = new Date(date + "T00:00:00"), today = new Date(); today.setHours(0, 0, 0, 0);
@@ -271,7 +301,17 @@ function taskDateLabel(date) {
   return due.toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 }
 function isOverdue(task) { return task.dueDate && !task.done && new Date(task.dueDate + "T23:59:59") < new Date(); }
-function updateTask(id, patch) { writeArray(DAY_TASKS_KEY, tasks().map(task => task.id === id ? { ...task, ...patch } : task)); renderDetail(); }
+function updateTask(id, patch) { const updated=tasks().map(task => task.id === id ? { ...task, ...patch } : task), promoted=promoteReadyTasks(updated); writeArray(DAY_TASKS_KEY, promoted.tasks); renderDetail(); }
+function reorderTask(sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) return;
+  const all = tasks(), topLevel = all.filter(task => !task.deleted && !task.parentTaskId && task.projectId === projectId && !task.done).sort((a,b)=>(a.order ?? 999999)-(b.order ?? 999999) || new Date(a.createdAt||0)-new Date(b.createdAt||0));
+  const sourceIndex = topLevel.findIndex(task => task.id === sourceId), targetIndex = topLevel.findIndex(task => task.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [moved] = topLevel.splice(sourceIndex, 1); topLevel.splice(targetIndex, 0, moved);
+  const orderById = new Map(topLevel.map((task, index) => [task.id, index]));
+  writeArray(DAY_TASKS_KEY, all.map(task => orderById.has(task.id) ? { ...task, order:orderById.get(task.id), reorderedAt:new Date().toISOString() } : task));
+  draggedTaskId = null; renderDetail();
+}
 function deleteTaskEverywhere(id) {
   const deletedAt = new Date().toISOString(), allTasks = tasks(), ids = new Set([id]);
   allTasks.filter(task => task.parentTaskId === id).forEach(task => ids.add(task.id));
@@ -281,7 +321,12 @@ function deleteTaskEverywhere(id) {
   writeArray(TASKS_KEY, withoutTask(readArray(TASKS_KEY)));
   ipcRenderer.send("session-created"); renderDetail();
 }
-function editTask(task) { openProjectEditor({ eyebrow:"Tarea", title:"Editar tarea", label:"Descripción", value:task.text, dueDate:task.dueDate || "", showDate:true, onSave:({ text,dueDate }) => updateTask(task.id, { text, dueDate:dueDate || null, editedAt:new Date().toISOString() }) }); }
+function editTask(task) {
+  const allTasks=tasks(), byId=new Map(allTasks.map(item=>[item.id,item]));
+  const dependsOn=(sourceId,targetId,seen=new Set())=>{if(sourceId===targetId)return true;if(seen.has(sourceId))return false;seen.add(sourceId);return (byId.get(sourceId)?.blockedByTaskIds||[]).some(id=>dependsOn(id,targetId,seen));};
+  const dependencyOptions=allTasks.filter(item=>!item.deleted&&item.id!==task.id&&item.projectId===task.projectId&&!dependsOn(item.id,task.id)).map(item=>({id:item.id,text:item.text,done:Boolean(item.done)}));
+  openProjectEditor({ eyebrow:"Tarea", title:"Editar tarea", label:"Descripción", value:task.text, dueDate:task.dueDate || "", category:task.category || "inbox", estimatedSessions:task.estimatedSessions || "", activateDate:task.activateDate||"", activateToCategory:task.activateToCategory||"actionable", blockedByTaskIds:task.blockedByTaskIds||[], dependencyOptions, showDate:true, showCategory:true, showEstimate:true, showAutomation:true, onSave:({ text,dueDate,category,estimatedSessions,activateDate,activateToCategory,blockedByTaskIds }) => { const automationChanged=(task.activateDate||"")!==(activateDate||"") || (task.activateToCategory||"actionable")!==(activateToCategory||"actionable") || JSON.stringify([...(task.blockedByTaskIds||[])].sort())!==JSON.stringify([...blockedByTaskIds].sort()); updateTask(task.id, { text, dueDate:dueDate || null, category:category || "inbox", estimatedSessions:estimatedSessions > 0 ? estimatedSessions : null, activateDate:activateDate||null, activateToCategory:activateToCategory||"actionable", blockedByTaskIds, automationResolvedAt:automationChanged?null:task.automationResolvedAt||null, editedAt:new Date().toISOString() }); } });
+}
 
 function activeSession() { try { return JSON.parse(localStorage.getItem(ACTIVE_SESSION_KEY) || "null"); } catch { return null; } }
 function importToSession(task) {
@@ -410,10 +455,12 @@ function renameChannel(id) {
   const channel = channels().find(item => item.id === id); if (!channel) return;
   openProjectEditor({ eyebrow:"Sección", title:"Editar sección", label:"Nombre", value:channel.name, onSave:({text}) => { writeArray(CHANNELS_KEY, channels().map(item => item.id === id ? { ...item, name:text } : item)); renderLibrary(); } });
 }
-function openProjectEditor({ eyebrow="Editar", title="Editar", label="Nombre", value="", dueDate="", showDate=false, onSave }) {
+function openProjectEditor({ eyebrow="Editar", title="Editar", label="Nombre", value="", dueDate="", category="inbox", estimatedSessions="", activateDate="", activateToCategory="actionable", blockedByTaskIds=[], dependencyOptions=[], showDate=false, showCategory=false, showEstimate=false, showAutomation=false, onSave }) {
   pendingEditorSave = onSave;
   $("projectEditEyebrow").textContent = eyebrow; $("projectEditTitle").textContent = title; $("projectEditTextLabel").firstChild.textContent = label;
-  $("projectEditText").value = value; $("projectEditDate").value = dueDate; $("projectEditDateRow").classList.toggle("hidden", !showDate);
+  $("projectEditText").value = value; $("projectEditDate").value = dueDate; $("projectEditDateRow").classList.toggle("hidden", !showDate); $("projectEditCategory").value = category; $("projectEditCategoryRow").classList.toggle("hidden", !showCategory); $("projectEditEstimate").value = estimatedSessions; $("projectEditEstimateRow").classList.toggle("hidden", !showEstimate);
+  $("projectEditActivateDate").value=activateDate; $("projectEditActivateTo").value=activateToCategory; $("projectEditAutomationRows").classList.toggle("hidden",!showAutomation); $("projectEditDependenciesRow").classList.toggle("hidden",!showAutomation);
+  const selectedDependencies=new Set(blockedByTaskIds); $("projectEditDependencies").innerHTML=dependencyOptions.length?`<div class="task-dependency-options">${dependencyOptions.map(item=>`<label><input type="checkbox" value="${esc(item.id)}" ${selectedDependencies.has(item.id)?"checked":""}><span>${item.done?"✓ ":""}${esc(item.text)}</span></label>`).join("")}</div>`:"<p>No hay otras tareas en este proyecto.</p>";
   $("projectEditDialog").showModal(); requestAnimationFrame(() => { $("projectEditText").focus(); $("projectEditText").select(); });
 }
 function closeProjectEditor() { pendingEditorSave = null; $("projectEditDialog").close(); }
@@ -443,7 +490,7 @@ $("moveProjectWorkChannel").addEventListener("change", event => fillMoveProjectS
 $("moveProjectClose").addEventListener("click", closeMoveProjectDialog);
 $("moveProjectCancel").addEventListener("click", closeMoveProjectDialog);
 $("moveProjectForm").addEventListener("submit", event => { event.preventDefault(); if (movingProjectId) moveProjectAcrossChannels(movingProjectId, $("moveProjectWorkChannel").value, $("moveProjectSection").value); });
-$("projectEditForm").addEventListener("submit", event => { event.preventDefault(); const text = $("projectEditText").value.trim(); if (!text || !pendingEditorSave) return; const save = pendingEditorSave, dueDate = $("projectEditDateRow").classList.contains("hidden") ? "" : $("projectEditDate").value; pendingEditorSave = null; $("projectEditDialog").close(); save({ text, dueDate }); });
+$("projectEditForm").addEventListener("submit", event => { event.preventDefault(); const text = $("projectEditText").value.trim(); if (!text || !pendingEditorSave) return; const save = pendingEditorSave, dueDate = $("projectEditDateRow").classList.contains("hidden") ? "" : $("projectEditDate").value, category = $("projectEditCategoryRow").classList.contains("hidden") ? null : $("projectEditCategory").value, estimatedSessions = $("projectEditEstimateRow").classList.contains("hidden") ? null : Math.max(0, Math.round(Number($("projectEditEstimate").value) || 0)), activateDate=$("projectEditAutomationRows").classList.contains("hidden")?null:$("projectEditActivateDate").value, activateToCategory=$("projectEditAutomationRows").classList.contains("hidden")?null:$("projectEditActivateTo").value, blockedByTaskIds=$("projectEditDependenciesRow").classList.contains("hidden")?[]:[...$("projectEditDependencies").querySelectorAll("input:checked")].map(input=>input.value); pendingEditorSave = null; $("projectEditDialog").close(); save({ text, dueDate, category, estimatedSessions, activateDate, activateToCategory, blockedByTaskIds }); });
 $("projectEditClose").addEventListener("click", closeProjectEditor);
 $("projectEditCancel").addEventListener("click", closeProjectEditor);
 $("channelForm").addEventListener("submit", event => {
@@ -478,14 +525,15 @@ $("projectForm").addEventListener("submit", event => {
 });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 document.addEventListener("click", event => { if (!event.target.closest(".card-menu") && !event.target.closest(".card-popover")) document.querySelectorAll(".card-popover").forEach(item => item.classList.add("hidden")); });
-window.addEventListener("focus", () => projectId ? renderDetail() : renderLibrary());
+window.addEventListener("focus", () => { applyTaskAutomations(); projectId ? renderDetail() : renderLibrary(); });
 window.addEventListener("storage", event => {
   if ([DAY_TASKS_KEY, SESSIONS_KEY, TASKS_KEY].includes(event.key)) projectId ? renderDetail() : renderLibrary();
   if (event.key === OPEN_PROJECT_KEY && event.newValue) { const target = projects().find(item => item.id === event.newValue && !item.archived); if (target) openProject(target.id); localStorage.removeItem(OPEN_PROJECT_KEY); }
 });
 
-syncDueTasksToToday(); ensureWorkChannels(); ensureChannels();
+syncDueTasksToToday(); applyTaskAutomations(); ensureWorkChannels(); ensureChannels();
 renderLibrary();
 const requestedProjectId = localStorage.getItem(OPEN_PROJECT_KEY);
 if (requestedProjectId && projects().some(item => item.id === requestedProjectId && !item.archived)) openProject(requestedProjectId);
 localStorage.removeItem(OPEN_PROJECT_KEY);
+setInterval(() => { if (applyTaskAutomations()) projectId ? renderDetail() : renderLibrary(); }, 60_000);

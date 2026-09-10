@@ -156,9 +156,9 @@ body.project-library-window {
 .detail-tabs { display: flex; align-items: flex-end; gap: 13px; margin-top: 22px; border-bottom: 1px solid var(--line); }
 .detail-tab { padding: 9px 4px; color: #282b31; background: transparent; border-bottom: 2px solid var(--blue); font-size: 13px; font-weight: 850; }
 .detail-helper { padding-bottom: 10px; color: #888d96; font-size: 10px; }
-.task-toolbar { margin-top: 12px; } .task-category-filters { display: flex; gap: 4px; }
+.task-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top: 12px; } .task-category-filters { display: flex; gap: 4px; }.task-workflow-help { color:#8b929c; font-size:8px; text-align:right; }
 .todo-add {
-  display: grid; grid-template-columns: 22px minmax(0,1fr) 112px 126px auto; align-items: center; gap: 7px;
+  display: grid; grid-template-columns: 22px minmax(0,1fr) 112px 126px 78px auto; align-items: center; gap: 7px;
   margin-top: 10px; padding: 9px; border: 1px solid #dfe2e7; border-radius: 12px; box-shadow: 0 2px 10px rgba(16,24,40,.04);
 }
 .todo-add-icon { color: #e34b4b; font-size: 22px; text-align: center; }
@@ -166,10 +166,12 @@ body.project-library-window {
 .todo-add input::placeholder { color: #9499a2; } .todo-add select option { color: #30333a; background: #fff; }
 .todo-list { display: flex; flex-direction: column; margin-top: 12px; border-top: 1px solid var(--line); }
 .todo-row {
-  display: grid; grid-template-columns: 24px 30px minmax(0,1fr) 28px 66px 27px; align-items: center; gap: 7px;
+  display: grid; grid-template-columns: 18px 24px 30px minmax(0,1fr) 28px 66px 27px; align-items: center; gap: 7px;
   min-height: 53px; padding: 7px 8px; border-bottom: 1px solid #eceef1; background: #fff;
 }
 .todo-row:hover { background: #fafbfc; }
+.task-drag-handle { width:18px; color:#a2a8b1; background:transparent; font-size:12px; font-weight:900; cursor:grab; }.task-drag-handle:active { cursor:grabbing; }.todo-row.done .task-drag-handle { visibility:hidden; }
+.todo-row.dragging-task { opacity:.35; }.todo-row.task-drop-target { border-top:2px solid #2f67ec; background:#eef4ff; }
 .todo-check { width: 19px; height: 19px; border: 2px solid #a9aeb8; border-radius: 50%; color: #fff; background: #fff; font-size: 10px; font-weight: 900; }
 .todo-row.priority-high .todo-check { border-color: #e14d4d; } .todo-row.priority-low .todo-check { border-color: #4c9b6d; }
 .todo-row.done { opacity: .56; } .todo-row.done .todo-check { border-color: #55a874; background: #55a874; } .todo-row.done .todo-copy strong { text-decoration: line-through; }
@@ -201,6 +203,7 @@ body.project-library-window {
 .project-edit-head small { color:#858b95; font-size:9px; font-weight:800; text-transform:uppercase; }.project-edit-head h2 { margin-top:3px; font-size:19px; }
 .project-edit-close { width:28px; height:28px; border-radius:8px; color:#737985; background:#f0f2f5; font-size:18px; }
 .project-edit-dialog label { display:flex; flex-direction:column; gap:6px; color:#626974; font-size:10px; font-weight:800; }
+.task-automation-fields { display:grid; grid-template-columns:1fr 1fr; gap:9px; padding:10px; border:1px solid #e2e6eb; border-radius:10px; background:#f8f9fb; }.task-dependency-fieldset { padding:10px; border:1px solid #e2e6eb; border-radius:10px; }.task-dependency-fieldset legend { padding:0 4px; color:#626974; font-size:10px; font-weight:850; }.task-dependency-fieldset>p { margin-bottom:7px; color:#858c96; font-size:9px; }.task-dependency-options { display:grid; grid-template-columns:1fr 1fr; gap:5px; max-height:130px; overflow:auto; }.task-dependency-options label { display:grid; grid-template-columns:15px minmax(0,1fr); align-items:center; gap:5px; padding:6px; border-radius:7px; background:#f6f7f9; }.task-dependency-options input { width:14px; height:14px; }.task-dependency-options span { overflow:hidden; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
 .move-project-help { margin-top:-3px; color:#7a818b; font-size:10px; line-height:1.45; }
 .project-edit-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:2px; }
 @media (max-width:900px) {
@@ -219,5 +222,5 @@ body.project-library-window {
   .creation-card,.project-creation { grid-template-columns: 1fr 1fr; } .creation-heading { grid-column: 1/-1; }
   .project-detail-hero { grid-template-columns: 1fr; }
   .todo-add { grid-template-columns: 22px 1fr auto; } .session-button { display: none; }
-  .todo-row { grid-template-columns:24px 30px minmax(0,1fr) 28px 27px; }
+  .todo-row { grid-template-columns:18px 24px 30px minmax(0,1fr) 28px 27px; }
 }

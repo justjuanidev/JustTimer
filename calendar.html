@@ -20,6 +20,9 @@
       <button class="tool-btn" id="nextWeekBtn" title="Semana siguiente">&gt;</button>
       </div>
       <div class="calendar-header-actions">
+        <button class="tool-btn calendar-view-toggle active" id="weekModeBtn" title="Vista semanal">Semana</button>
+        <button class="tool-btn calendar-view-toggle" id="monthModeBtn" title="Vista mensual">Mes</button>
+        <button class="tool-btn" id="weeklyPlanBtn" title="Planificar esta semana">Plan semanal</button>
         <button class="tool-btn google-calendar-icon" id="googleCalendarBtn" title="Google Calendar" aria-label="Google Calendar"><span></span></button>
         <button class="tool-btn calendar-stats-icon" id="calendarStatsBtn" title="Estadísticas" aria-label="Estadísticas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></svg></button>
         <button class="tool-btn task-planner-toggle" id="taskPlannerBtn" title="Lista de tareas">Tareas »</button>
@@ -27,6 +30,8 @@
     </div>
 
     <section class="channel-goals" id="channelGoals"></section>
+
+    <section class="monthly-summary hidden" id="monthlySummary"></section>
 
     <div class="calendar-layout" id="calendarLayout">
       <section class="calendar-grid" id="calendarGrid" aria-label="Calendario semanal"></section>
@@ -50,6 +55,44 @@
       <label>Objetivo semanal (minutos)<input class="tool-input" id="goalWeeklyMinutes" type="number" min="1" max="10080" /></label>
       <button class="tool-btn primary" id="saveGoalBtn" value="default">Guardar objetivo</button>
     </form>
+  </dialog>
+
+  <dialog class="session-record-dialog weekly-plan-dialog" id="weeklyPlanDialog">
+    <form id="weeklyPlanForm">
+      <div class="side-panel-head">
+        <div><div class="side-title">Plan de la semana</div><div class="side-meta" id="weeklyPlanRange"></div></div>
+        <button class="side-close" id="closeWeeklyPlan" type="button">×</button>
+      </div>
+      <label>¿En qué te querés enfocar esta semana?
+        <input class="tool-input" id="weeklyFocusText" maxlength="180" placeholder="Terminar montaje de Taxer" />
+      </label>
+      <div class="weekly-plan-fields">
+        <label>Objetivo semanal<input class="tool-input" id="weeklySessionTarget" type="number" min="0" max="500" step="1" /></label>
+        <label>Ritmo diario orientativo<input class="tool-input" id="dailySessionTarget" type="number" min="0" max="100" step="1" /></label>
+        <label>Foco principal<select class="tool-select" id="weeklyFocusChannel"></select></label>
+      </div>
+      <fieldset class="planned-days-fieldset">
+        <legend>Días previstos</legend>
+        <div id="plannedDays"></div>
+      </fieldset>
+      <section class="weekly-distribution-editor">
+        <div><strong>Distribución por canal</strong><small>No hace falta asignar todas las sesiones.</small></div>
+        <div id="weeklyChannelTargets"></div>
+        <p id="weeklyFlexibleSessions"></p>
+      </section>
+      <div class="weekly-plan-actions">
+        <button class="tool-btn" id="usePreviousPlan" type="button">Usar configuración anterior</button>
+        <button class="tool-btn primary" type="submit">Guardar semana</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="session-record-dialog weekly-review-dialog" id="weeklyReviewDialog">
+    <div id="weeklyReviewContent"></div>
+  </dialog>
+
+  <dialog class="session-record-dialog month-day-dialog" id="monthDayDialog">
+    <div id="monthDayContent"></div>
   </dialog>
 
   <dialog class="session-record-dialog channel-stats-dialog" id="channelStatsDialog">

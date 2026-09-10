@@ -58,11 +58,11 @@
       <button class="back-button" id="backToProjects">← Todos los proyectos</button>
       <div class="project-detail-hero" id="projectDetailHero"></div>
       <div class="detail-tabs"><button class="detail-tab active">Tareas</button><span class="detail-helper">Las tareas viven dentro de este proyecto.</span></div>
-      <div class="task-toolbar"><div class="task-category-filters" id="taskCategoryFilters"></div></div>
+      <div class="task-toolbar"><div class="task-category-filters" id="taskCategoryFilters"></div><p class="task-workflow-help">Inbox captura · Accionable está listo · Incubadora espera capacidad o tareas · Snooze espera una fecha o tercero</p></div>
       <form class="todo-add" id="taskForm">
         <span class="todo-add-icon">+</span><input id="newTaskInput" maxlength="160" placeholder="Agregar una tarea" />
         <select id="newTaskCategory" aria-label="Sección de la tarea"><option value="inbox">Inbox</option><option value="actionable">Accionable</option><option value="incubator">Incubadora</option><option value="snooze">Snooze</option></select>
-        <input id="newTaskDue" type="date" title="Fecha límite" /><button class="ui-btn primary" type="submit">Agregar</button>
+        <input id="newTaskDue" type="date" title="Fecha límite" /><input id="newTaskEstimate" type="number" min="0" max="999" step="1" placeholder="Sesiones" title="Sesiones estimadas" /><button class="ui-btn primary" type="submit">Agregar</button>
       </form>
       <div class="todo-list" id="dayTaskList"></div>
     </section>
@@ -72,7 +72,14 @@
     <form id="projectEditForm">
       <div class="project-edit-head"><div><small id="projectEditEyebrow">Editar</small><h2 id="projectEditTitle">Editar</h2></div><button class="project-edit-close" id="projectEditClose" type="button">×</button></div>
       <label id="projectEditTextLabel">Nombre<input class="light-input" id="projectEditText" maxlength="160" required /></label>
-      <label class="hidden" id="projectEditDateRow">Fecha límite<input class="light-input" id="projectEditDate" type="date" /></label>
+        <label class="hidden" id="projectEditDateRow">Fecha límite<input class="light-input" id="projectEditDate" type="date" /></label>
+        <label class="hidden" id="projectEditCategoryRow">Estado<select class="light-select" id="projectEditCategory"><option value="inbox">Inbox</option><option value="actionable">Accionable</option><option value="incubator">Incubadora</option><option value="snooze">Snooze</option></select></label>
+        <label class="hidden" id="projectEditEstimateRow">Sesiones estimadas<input class="light-input" id="projectEditEstimate" type="number" min="0" max="999" step="1" placeholder="Sin estimación" /></label>
+        <div class="hidden task-automation-fields" id="projectEditAutomationRows">
+          <label>Activar en una fecha<input class="light-input" id="projectEditActivateDate" type="date" /></label>
+          <label>Mover automáticamente a<select class="light-select" id="projectEditActivateTo"><option value="actionable">Accionable</option><option value="incubator">Incubadora</option></select></label>
+        </div>
+        <fieldset class="hidden task-dependency-fieldset" id="projectEditDependenciesRow"><legend>Tareas conectadas</legend><p>Esta tarea se activará cuando todas las seleccionadas estén terminadas.</p><div id="projectEditDependencies"></div></fieldset>
       <div class="project-edit-actions"><button class="ui-btn quiet" id="projectEditCancel" type="button">Cancelar</button><button class="ui-btn primary" type="submit">Guardar</button></div>
     </form>
   </dialog>

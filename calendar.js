@@ -9,6 +9,8 @@ const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 const SLOT_HEIGHT = 28;
 const GOOGLE_SYNC_KEY = "justtimer.googleCalendarSync.v1";
 const CHANNEL_GOALS_KEY = "justtimer.channelGoals.v1";
+const WEEKLY_PLANS_KEY = "justtimer.weeklyPlans.v1";
+const WEEKLY_PROMPT_KEY = "justtimer.weeklyPlanPrompted.v1";
 const OPEN_PROJECT_KEY = "justtimer.openProjectId.v1";
 
 let weekStart = startOfWeek(new Date());
@@ -20,6 +22,9 @@ let didAutoScroll = false;
 let registerMode = false;
 let taskPlannerOpen = false;
 let editingGoalChannelId = null;
+let calendarMode = "week";
+let monthYear = new Date().getFullYear();
+let selectedMonth = new Date().getMonth();
 const expandedPlannerTaskIds = new Set();
 
 function $(id) {
@@ -43,6 +48,72 @@ function readChannelGoals() {
   try { const value = JSON.parse(localStorage.getItem(CHANNEL_GOALS_KEY) || "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; }
 }
 
+function readWeeklyPlans() {
+  try {
+    const value = JSON.parse(localStorage.getItem(WEEKLY_PLANS_KEY) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+function weekKey(date) { return dateKey(startOfWeek(date)); }
+
+function planForWeek(date) { return readWeeklyPlans()[weekKey(date)] || null; }
+
+function completedSessionsInRange(start, end, sessions = readSessions()) {
+  return sessions.filter(session => {
+    const at = new Date(session.startAt);
+    return session.status === "done" && !Number.isNaN(at.getTime()) && at >= start && at < end;
+  });
+}
+
+function sessionMinutes(session) { return Math.max(0, Number(session.durationSecs) || 0) / 60; }
+
+function formatMinutes(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60), rest = total % 60;
+  return hours ? `${hours}h${rest ? ` ${rest}m` : ""}` : `${rest}m`;
+}
+
+function weeklyResult(date, plan = planForWeek(date)) {
+  const start = startOfWeek(date), end = addDays(start, 7), projects = readProjects();
+  const projectMap = new Map(projects.map(project => [project.id, project]));
+  const sessions = completedSessionsInRange(start, end);
+  const byChannel = new Map();
+  const byDay = new Map(Array.from({ length: 7 }, (_, index) => [dateKey(addDays(start, index)), 0]));
+  let minutes = 0;
+  sessions.forEach(session => {
+    const channelId = session.workArea || projectWorkChannel(projectMap.get(session.projectId));
+    const row = byChannel.get(channelId) || { sessions: 0, minutes: 0 };
+    row.sessions += 1; row.minutes += sessionMinutes(session); byChannel.set(channelId, row);
+    const key = dateKey(new Date(session.startAt)); byDay.set(key, (byDay.get(key) || 0) + 1);
+    minutes += sessionMinutes(session);
+  });
+  const dailyTarget = Math.max(0, Number(plan?.dailySessions) || 0);
+  const plannedDays = Array.isArray(plan?.plannedDays) ? plan.plannedDays : [];
+  const reachedDays = dailyTarget ? plannedDays.filter(index => (byDay.get(dateKey(addDays(start, index))) || 0) >= dailyTarget).length : 0;
+  const energies = sessions.map(session => Number(session.energy)).filter(value => value >= 1 && value <= 10);
+  return { start, end, sessions, totalSessions: sessions.length, minutes, byChannel, byDay, plannedDays, reachedDays, averageEnergy: energies.length ? energies.reduce((sum, value) => sum + value, 0) / energies.length : null };
+}
+
+function planPercent(actual, target) { return target > 0 ? Math.round(actual / target * 100) : 0; }
+
+function weeklyPaceLabel(plan, result) {
+  const daily = Math.max(0,Number(plan?.dailySessions)||0), weekly = Math.max(0,Number(plan?.weeklySessions)||0);
+  if (!daily || !result.plannedDays.length) return "";
+  const today=new Date(), endOfToday=new Date(today); endOfToday.setHours(23,59,59,999);
+  if (today<result.start) return "la semana todavía no empezó";
+  const expectedDays=result.plannedDays.filter(index=>addDays(result.start,index)<=endOfToday).length;
+  const expected=Math.min(weekly||Infinity,expectedDays*daily), difference=result.totalSessions-expected;
+  if (!difference) return "al ritmo previsto";
+  return `${Math.abs(difference)} ${Math.abs(difference)===1?"sesión":"sesiones"} por ${difference>0?"encima":"debajo"} del ritmo`;
+}
+
+function focusChannelForPlan(plan) {
+  if (plan?.focusTarget?.startsWith("channel:")) return plan.focusTarget.slice(8);
+  if (plan?.focusTarget?.startsWith("project:")) return projectWorkChannel(readProjects().find(project=>project.id===plan.focusTarget.slice(8)));
+  return plan?.focusChannelId || null;
+}
+
 function goalAvatar(channel) {
   return channel.avatarUrl ? `<img src="${escapeAttr(channel.avatarUrl)}" alt="" />` : `<span>${channel.id === "routine" ? "J" : escapeHtml((channel.name || "J").slice(0, 1).toUpperCase())}</span>`;
 }
@@ -56,19 +127,37 @@ function statsInRange(channelId, start, end, allSessions = readSessions(), proje
 }
 
 function renderChannelGoals() {
-  const box = $("channelGoals"), goals = readChannelGoals(), today = new Date(), sessions = readSessions(), projectMap = new Map(readProjects().map(project => [project.id, project]));
-  const dayStart = new Date(today); dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = addDays(dayStart, 1), week = startOfWeek(today), weekEnd = addDays(week, 7);
-  box.innerHTML = readWorkChannels().filter(channel => channel.id !== "routine").map(channel => {
-    const target = goals[channel.id] || { dailyMinutes: 75, weeklyMinutes: 375 };
-    const daily = statsInRange(channel.id, dayStart, dayEnd, sessions, projectMap), weekly = statsInRange(channel.id, week, weekEnd, sessions, projectMap);
-    return `<button class="channel-goal-card" data-channel-goal="${escapeAttr(channel.id)}" title="Ver progreso semanal de ${escapeAttr(channel.name)}"><span class="goal-avatar">${goalAvatar(channel)}</span><span class="goal-copy"><strong>${escapeHtml(channel.name)}</strong><small><b>Hoy</b> ${daily.minutes}/${target.dailyMinutes} min · ${daily.sessions} sesiones</small><small><b>Semana</b> ${weekly.minutes}/${target.weeklyMinutes} min · ${weekly.sessions} sesiones</small></span></button>`;
+  const box = $("channelGoals"), plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan), goals = readChannelGoals();
+  const today=new Date(), todayStart=new Date(today); todayStart.setHours(0,0,0,0); const todayEnd=addDays(todayStart,1), selectedIsCurrent=weekKey(weekStart)===weekKey(today), projectMap=new Map(readProjects().map(project=>[project.id,project]));
+  const target = Math.max(0, Number(plan?.weeklySessions) || 0), percent = planPercent(result.totalSessions, target);
+  const channels = readWorkChannels().filter(channel => channel.id !== "routine");
+  const flexible = Math.max(0, target - Object.values(plan?.channelTargets || {}).reduce((sum, value) => sum + (Number(value) || 0), 0));
+  const pace = weeklyPaceLabel(plan,result);
+  const focus = plan?.focusText || "Sin enfoque configurado";
+  const general = `<article class="weekly-goal-overview ${target && result.totalSessions >= target ? "complete" : ""}">
+    <div class="weekly-goal-title"><span>${target && result.totalSessions >= target ? "🎯" : "◎"}</span><div><strong>${target ? `${result.totalSessions} / ${target} sesiones` : `${result.totalSessions} sesiones`}</strong><small>${escapeHtml(focus)}</small></div></div>
+    <div class="weekly-progress-track"><i style="width:${Math.min(100, percent)}%"></i></div>
+    <div class="weekly-goal-meta"><span>${target ? `${percent}%` : "Sin plan"}</span><span>${formatMinutes(result.minutes)}</span><span>${plan?.dailySessions ? `${result.reachedDays}/${result.plannedDays.length} días al ritmo` : "Ritmo sin definir"}</span>${pace?`<span>${escapeHtml(pace)}</span>`:""}${flexible ? `<span>${flexible} flexibles</span>` : ""}</div>
+    <div class="weekly-goal-actions"><button class="weekly-inline-btn" data-edit-week>Editar plan</button><button class="weekly-inline-btn" data-review-week>Review</button></div>
+  </article>`;
+  const cards = channels.map(channel => {
+    const actual = result.byChannel.get(channel.id) || { sessions: 0, minutes: 0 };
+    const sessionTarget = Math.max(0, Number(plan?.channelTargets?.[channel.id]) || 0);
+    const legacy = goals[channel.id] || { dailyMinutes: 75, weeklyMinutes: 375 };
+    const daily=selectedIsCurrent?statsInRange(channel.id,todayStart,todayEnd,readSessions(),projectMap):null;
+    const channelPercent = planPercent(actual.sessions, sessionTarget);
+    const focused = focusChannelForPlan(plan) === channel.id;
+    if (!sessionTarget && !actual.sessions && !focused) return "";
+    return `<button class="channel-goal-card ${focused ? "weekly-focus-channel" : ""}" data-channel-goal="${escapeAttr(channel.id)}" title="Ver progreso semanal de ${escapeAttr(channel.name)}"><span class="goal-avatar">${goalAvatar(channel)}</span><span class="goal-copy"><strong>${focused ? "🔥 " : ""}${escapeHtml(channel.name)}</strong>${daily?`<small><b>Hoy</b> ${daily.minutes}/${legacy.dailyMinutes} min · ${daily.sessions} sesiones</small>`:""}<small><b>Semana</b> ${actual.sessions}${sessionTarget ? `/${sessionTarget}` : ""} sesiones · ${formatMinutes(actual.minutes)}</small><small><b>Minutos</b> ${Math.round(actual.minutes)}/${legacy.weeklyMinutes}</small>${sessionTarget ? `<i class="single-progress"><b style="width:${Math.min(100, channelPercent)}%"></b></i>` : ""}</span></button>`;
   }).join("");
+  box.innerHTML = general + cards;
+  box.querySelector("[data-edit-week]")?.addEventListener("click", () => openWeeklyPlan(weekStart));
+  box.querySelector("[data-review-week]")?.addEventListener("click", () => openWeeklyReview(weekStart));
   box.querySelectorAll("[data-channel-goal]").forEach(button => button.addEventListener("click", () => openChannelStats(button.dataset.channelGoal)));
 }
 
 function openChannelStats(channelId) {
-  const channel = workChannelInfo(channelId), week = startOfWeek(new Date()), weekEnd = addDays(week, 7), goals = readChannelGoals();
+  const channel = workChannelInfo(channelId), week = startOfWeek(weekStart), weekEnd = addDays(week, 7), goals = readChannelGoals(), plan = planForWeek(week);
   const target = goals[channelId] || { dailyMinutes: 75, weeklyMinutes: 375 }, projects = readProjects(), projectMap = new Map(projects.map(project => [project.id, project]));
   const sessions = readSessions().filter(session => session.status === "done" && inferredWorkArea(session) === channelId && new Date(session.startAt) >= week && new Date(session.startAt) < weekEnd);
   const completedTasks = readDayTasks().filter(task => task.done && task.completedAt && new Date(task.completedAt) >= week && new Date(task.completedAt) < weekEnd && projectWorkChannel(projectMap.get(task.projectId)) === channelId);
@@ -77,7 +166,8 @@ function openChannelStats(channelId) {
   const projectRows = new Map();
   sessions.forEach(session => { const name = projectMap.get(session.projectId)?.title || session.projectName || "Trabajo general"; const row = projectRows.get(name) || { minutes:0, sessions:0 }; row.minutes += (Number(session.durationSecs) || 0) / 60; row.sessions += 1; projectRows.set(name, row); });
   const dialog = $("channelStatsDialog");
-  $("channelStatsDialogContent").innerHTML = `<div class="session-dialog-head"><div><span>${fmtDate(week)} – ${fmtDate(addDays(weekEnd,-1))}</span><h2>${escapeHtml(channel.name)} · esta semana</h2></div><button class="side-close" id="closeChannelStats" type="button">×</button></div><div class="channel-week-kpis"><div><strong>${(minutes / 60).toFixed(1)} h</strong><span>enfoque</span></div><div><strong>${sessions.length}</strong><span>sesiones</span></div><div><strong>${completedTasks.length}</strong><span>tareas hechas</span></div><div><strong>${averageEnergy === null ? "—" : averageEnergy.toFixed(1)}</strong><span>energía media</span></div></div><section class="session-dialog-section channel-goal-summary"><h3>Objetivo semanal</h3><p>${Math.round(minutes)} de ${target.weeklyMinutes} minutos · ${Math.round(minutes / Math.max(1,target.weeklyMinutes) * 100)}%</p><button class="tool-btn" id="editChannelGoal" type="button">Modificar objetivos</button></section><section class="session-dialog-section"><h3>Distribución por video/proyecto</h3>${projectRows.size ? [...projectRows].sort((a,b)=>b[1].minutes-a[1].minutes).map(([name,row]) => `<div class="channel-project-stat"><strong>${escapeHtml(name)}</strong><span>${(row.minutes/60).toFixed(1)} h · ${row.sessions} sesiones</span></div>`).join("") : "<p>Todavía no hay sesiones terminadas esta semana.</p>"}</section><p class="channel-break-summary">Breaks registrados: ${Math.round(breakMinutes)} min</p>`;
+  const weeklySessionTarget = Math.max(0, Number(plan?.channelTargets?.[channelId]) || 0);
+  $("channelStatsDialogContent").innerHTML = `<div class="session-dialog-head"><div><span>${fmtDate(week)} – ${fmtDate(addDays(weekEnd,-1))}</span><h2>${escapeHtml(channel.name)} · semana seleccionada</h2></div><button class="side-close" id="closeChannelStats" type="button">×</button></div><div class="channel-week-kpis"><div><strong>${(minutes / 60).toFixed(1)} h</strong><span>enfoque</span></div><div><strong>${sessions.length}${weeklySessionTarget ? `/${weeklySessionTarget}` : ""}</strong><span>sesiones</span></div><div><strong>${completedTasks.length}</strong><span>tareas hechas</span></div><div><strong>${averageEnergy === null ? "—" : averageEnergy.toFixed(1)}</strong><span>energía media</span></div></div><section class="session-dialog-section channel-goal-summary"><h3>Objetivos</h3><p>${weeklySessionTarget ? `${sessions.length} de ${weeklySessionTarget} sesiones · ${planPercent(sessions.length, weeklySessionTarget)}%<br>` : ""}${Math.round(minutes)} de ${target.weeklyMinutes} minutos · ${Math.round(minutes / Math.max(1,target.weeklyMinutes) * 100)}%</p><button class="tool-btn" id="editChannelGoal" type="button">Objetivo de minutos</button></section><section class="session-dialog-section"><h3>Distribución por video/proyecto</h3>${projectRows.size ? [...projectRows].sort((a,b)=>b[1].minutes-a[1].minutes).map(([name,row]) => `<div class="channel-project-stat"><strong>${escapeHtml(name)}</strong><span>${(row.minutes/60).toFixed(1)} h · ${row.sessions} sesiones</span></div>`).join("") : "<p>Todavía no hay sesiones terminadas esta semana.</p>"}</section><p class="channel-break-summary">Breaks registrados: ${Math.round(breakMinutes)} min</p>`;
   $("closeChannelStats").addEventListener("click", () => dialog.close());
   $("editChannelGoal").addEventListener("click", () => { dialog.close(); editChannelGoal(channelId); });
   dialog.showModal();
@@ -252,6 +342,7 @@ function sessionPreview(session, start, channel = null) {
 }
 
 function renderCalendar() {
+  if (calendarMode === "month") { renderMonthView(); return; }
   const grid = $("calendarGrid");
   const days = getVisibleDays();
   $("weekLabel").textContent = `${fmtDate(days[0])} - ${fmtDate(days.at(-1))}/${days.at(-1).getFullYear()}`;
@@ -270,7 +361,9 @@ function renderCalendar() {
   });
   const milestoneHeight = Math.max(32, Math.max(0, ...[...milestoneByDay.values()].map(items => items.length)) * 24 + 6);
   const milestoneCell = day => (milestoneByDay.get(dateKey(day)) || []).map(({ project, kind }) => `<button class="project-milestone ${kind}" data-project-id="${escapeAttr(project.id)}" title="Abrir ${escapeAttr(project.title)}"><b>${kind === "start" ? "▶" : "◆"}</b><span>${kind === "start" ? "Inicio" : "Límite"} · ${escapeHtml(project.title)}</span></button>`).join("");
-  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content" style="--day-count:${days.length}"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head">${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</div>`).join("")}</div><div class="calendar-milestone-row" style="height:${milestoneHeight}px"><div class="milestone-label">Proyectos</div>${days.map(day => `<div class="milestone-day">${milestoneCell(day)}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
+  const plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan);
+  const dailyBadge = day => { const count = result.byDay.get(dateKey(day)) || 0, target = Math.max(0, Number(plan?.dailySessions) || 0), index = Math.round((startOfWeek(day) - startOfWeek(weekStart)) / 86400000) + ((day.getDay() + 6) % 7), planned = plan?.plannedDays?.includes(index); return target ? `<small class="daily-rhythm ${count >= target ? "reached" : ""} ${planned ? "planned" : "extra"}">${count}/${target}${count >= target ? " ✓" : ""}</small>` : ""; };
+  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content" style="--day-count:${days.length}"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head"><span>${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</span>${dailyBadge(day)}</div>`).join("")}</div><div class="calendar-milestone-row" style="height:${milestoneHeight}px"><div class="milestone-label">Proyectos</div>${days.map(day => `<div class="milestone-day">${milestoneCell(day)}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
   grid.querySelectorAll(".project-milestone").forEach(button => button.addEventListener("click", () => {
     localStorage.setItem(OPEN_PROJECT_KEY, button.dataset.projectId);
     ipcRenderer.send("open-day-tasks");
@@ -815,7 +908,132 @@ function saveSession() {
   renderCalendar();
 }
 
+function previousWeeklyPlan(beforeDate) {
+  const before = weekKey(beforeDate), plans = readWeeklyPlans();
+  return Object.keys(plans).filter(key => key < before).sort().reverse().map(key => plans[key]).find(Boolean) || null;
+}
+
+function weeklyPlanRangeLabel(date) {
+  const start = startOfWeek(date), end = addDays(start, 6);
+  return `${start.toLocaleDateString("es-AR", { day:"numeric", month:"long" })} – ${end.toLocaleDateString("es-AR", { day:"numeric", month:"long", year:"numeric" })}`;
+}
+
+function fillWeeklyPlanForm(plan) {
+  $("weeklyFocusText").value = plan?.focusText || "";
+  $("weeklySessionTarget").value = Number(plan?.weeklySessions) || 36;
+  $("dailySessionTarget").value = Number(plan?.dailySessions) || 6;
+  $("weeklyFocusChannel").value = plan?.focusTarget || (plan?.focusChannelId ? `channel:${plan.focusChannelId}` : "");
+  const planned = new Set(Array.isArray(plan?.plannedDays) ? plan.plannedDays : [0,1,2,3,4,5]);
+  $("plannedDays").querySelectorAll("input").forEach(input => { input.checked = planned.has(Number(input.value)); });
+  $("weeklyChannelTargets").querySelectorAll("input").forEach(input => { input.value = Number(plan?.channelTargets?.[input.dataset.channelTarget]) || ""; });
+  updateFlexibleSessions();
+}
+
+function updateFlexibleSessions() {
+  const total = Math.max(0, Number($("weeklySessionTarget").value) || 0);
+  const assigned = [...$("weeklyChannelTargets").querySelectorAll("input")].reduce((sum, input) => sum + Math.max(0, Number(input.value) || 0), 0);
+  const flexible = total - assigned;
+  $("weeklyFlexibleSessions").textContent = flexible >= 0 ? `${flexible} sesiones flexibles` : `${Math.abs(flexible)} sesiones por encima del objetivo general (permitido)`;
+  $("weeklyFlexibleSessions").classList.toggle("over-assigned", flexible < 0);
+}
+
+function openWeeklyPlan(date = weekStart) {
+  const start = startOfWeek(date), plan = planForWeek(start), channels = readWorkChannels().filter(channel => channel.id !== "routine");
+  $("weeklyPlanRange").textContent = weeklyPlanRangeLabel(start);
+  const projects=readProjects().filter(project=>!project.archived);
+  $("weeklyFocusChannel").innerHTML = `<option value="">Sin foco único</option><optgroup label="Canales">${channels.map(channel => `<option value="channel:${escapeAttr(channel.id)}">${escapeHtml(channel.name)}</option>`).join("")}</optgroup><optgroup label="Proyectos / videos">${projects.map(project=>`<option value="project:${escapeAttr(project.id)}">${escapeHtml(project.title)}</option>`).join("")}</optgroup>`;
+  $("plannedDays").innerHTML = DAYS.map((day,index) => `<label><input type="checkbox" value="${index}"><span>${day}</span></label>`).join("");
+  $("weeklyChannelTargets").innerHTML = channels.map(channel => `<label><span class="goal-avatar">${goalAvatar(channel)}</span><strong>${escapeHtml(channel.name)}</strong><input class="tool-input" type="number" min="0" max="500" step="1" data-channel-target="${escapeAttr(channel.id)}" placeholder="0"></label>`).join("");
+  fillWeeklyPlanForm(plan);
+  $("usePreviousPlan").disabled = !previousWeeklyPlan(start);
+  $("weeklyPlanDialog").dataset.weekStart = weekKey(start);
+  $("weeklyPlanDialog").showModal();
+}
+
+function saveWeeklyPlan(event) {
+  event.preventDefault();
+  const key = $("weeklyPlanDialog").dataset.weekStart, plans = readWeeklyPlans(), existing = plans[key] || null;
+  const plannedDays = [...$("plannedDays").querySelectorAll("input:checked")].map(input => Number(input.value));
+  const channelTargets = Object.fromEntries([...$("weeklyChannelTargets").querySelectorAll("input")].map(input => [input.dataset.channelTarget, Math.max(0, Math.round(Number(input.value) || 0))]).filter(([,value]) => value > 0));
+  const focusTarget=$("weeklyFocusChannel").value || null, focusChannelId=focusTarget?.startsWith("channel:") ? focusTarget.slice(8) : null;
+  const next = { weekStart:key, weekEnd:dateKey(addDays(new Date(`${key}T00:00:00`),6)), focusText:$("weeklyFocusText").value.trim(), weeklySessions:Math.max(0,Math.round(Number($("weeklySessionTarget").value)||0)), dailySessions:Math.max(0,Math.round(Number($("dailySessionTarget").value)||0)), plannedDays, focusTarget, focusChannelId, channelTargets, createdAt:existing?.createdAt || new Date().toISOString(), updatedAt:new Date().toISOString(), revisions:Array.isArray(existing?.revisions) ? existing.revisions : [] };
+  if (!plannedDays.length && next.dailySessions) { alert("Elegí al menos un día previsto o dejá el ritmo diario en cero."); return; }
+  if (existing) {
+    const changed = JSON.stringify([existing.weeklySessions,existing.dailySessions,existing.plannedDays,existing.channelTargets]) !== JSON.stringify([next.weeklySessions,next.dailySessions,next.plannedDays,next.channelTargets]);
+    if (changed && new Date() >= new Date(`${key}T00:00:00`) && !window.confirm("Esta semana ya empezó. ¿Querés actualizar el plan? Se conservará una copia de la configuración anterior.")) return;
+    if (changed) next.revisions = [...next.revisions, { changedAt:new Date().toISOString(), weeklySessions:existing.weeklySessions, dailySessions:existing.dailySessions, plannedDays:existing.plannedDays, focusText:existing.focusText, focusTarget:existing.focusTarget, focusChannelId:existing.focusChannelId, channelTargets:existing.channelTargets }].slice(-20);
+  }
+  plans[key] = next; localStorage.setItem(WEEKLY_PLANS_KEY, JSON.stringify(plans)); ipcRenderer.send("data-changed");
+  $("weeklyPlanDialog").close(); renderCalendar(); showMsg("Plan semanal guardado");
+}
+
+function openWeeklyReview(date = weekStart) {
+  const plan = planForWeek(date), result = weeklyResult(date, plan), target = Math.max(0,Number(plan?.weeklySessions)||0), percent = planPercent(result.totalSessions,target);
+  const channels = readWorkChannels().filter(channel => channel.id !== "routine");
+  const ids = new Set([...Object.keys(plan?.channelTargets || {}), ...result.byChannel.keys()]);
+  const distribution = channels.filter(channel => ids.has(channel.id)).map(channel => { const actual=result.byChannel.get(channel.id)||{sessions:0,minutes:0}, goal=Number(plan?.channelTargets?.[channel.id])||0; return `<div class="review-channel-row"><strong>${focusChannelForPlan(plan)===channel.id ? "🔥 " : ""}${escapeHtml(channel.name)}</strong><span>${actual.sessions}${goal ? ` / ${goal}` : ""} sesiones · ${formatMinutes(actual.minutes)}</span></div>`; }).join("");
+  $("weeklyReviewContent").innerHTML = `<div class="session-dialog-head"><div><span>${weeklyPlanRangeLabel(date)}</span><h2>Review semanal</h2></div><button class="side-close" id="closeWeeklyReview" type="button">×</button></div><section class="weekly-review-hero"><small>Enfoque</small><strong>${escapeHtml(plan?.focusText || "No se configuró un enfoque")}</strong><div>${result.totalSessions}${target ? ` / ${target}` : ""} sesiones · ${target ? `${percent}%` : "sin objetivo"}</div></section><div class="channel-week-kpis"><div><strong>${formatMinutes(result.minutes)}</strong><span>tiempo total</span></div><div><strong>${result.reachedDays}/${result.plannedDays.length}</strong><span>días al ritmo</span></div><div><strong>${result.averageEnergy===null ? "—" : result.averageEnergy.toFixed(1)}</strong><span>energía media</span></div><div><strong>${target && result.totalSessions>=target ? "Cumplido" : "En curso"}</strong><span>resultado semanal</span></div></div><section class="session-dialog-section"><h3>Distribución real y planificada</h3>${distribution || "<p>No hay sesiones ni distribución configurada.</p>"}</section><div class="weekly-plan-actions"><button class="tool-btn" id="editFromReview" type="button">Editar plan</button><button class="tool-btn primary" id="prepareNextWeek" type="button">Preparar próxima semana</button></div>`;
+  $("closeWeeklyReview").addEventListener("click",()=>$("weeklyReviewDialog").close());
+  $("editFromReview").addEventListener("click",()=>{$("weeklyReviewDialog").close();openWeeklyPlan(date);});
+  $("prepareNextWeek").addEventListener("click",()=>{$("weeklyReviewDialog").close();openWeeklyPlan(addDays(startOfWeek(date),7));});
+  $("weeklyReviewDialog").showModal();
+}
+
+function monthWeeks(year, month) {
+  const first = new Date(year,month,1), last = new Date(year,month+1,0), rows=[];
+  let cursor=startOfWeek(first);
+  while (cursor<=last) { rows.push(Array.from({length:7},(_,index)=>addDays(cursor,index))); cursor=addDays(cursor,7); }
+  return rows;
+}
+
+function importantItemsForDay(date) {
+  const key=dateKey(date), projects=readProjects().filter(project=>!project.archived), tasks=readDayTasks().filter(task=>!task.deleted && task.dueDate===key), sessions=readSessions().filter(session=>session.status!=="cancelled" && sameDayKey(session.startAt,key));
+  return [
+    ...projects.filter(project=>project.startDate===key).map(project=>({kind:"start",label:`Inicio — ${project.title}`})),
+    ...projects.filter(project=>project.dueDate===key).map(project=>({kind:"due",label:`Entrega — ${project.title}`})),
+    ...tasks.map(task=>({kind:"task",label:`Fecha límite — ${task.text}`})),
+    ...sessions.map(session=>({kind:session.source==="google-focusmate"?"external":"session",label:`${session.source==="google-focusmate"?"Focusmate":"Sesión"} — ${fmtHour(new Date(session.startAt))}${session.projectName?` · ${session.projectName}`:""}`,session}))
+  ];
+}
+
+function monthSummary(year,month) {
+  const start=new Date(year,month,1),end=new Date(year,month+1,1),sessions=completedSessionsInRange(start,end),minutes=sessions.reduce((sum,item)=>sum+sessionMinutes(item),0),plans=readWeeklyPlans();
+  const weekStarts=[...new Set(monthWeeks(year,month).map(row=>weekKey(row[0])))], configured=weekStarts.map(key=>plans[key]).filter(plan=>plan && new Date(`${plan.weekStart}T00:00:00`).getMonth()===month), objective=configured.reduce((sum,plan)=>sum+(Number(plan.weeklySessions)||0),0);
+  const reachedWeeks=configured.filter(plan=>weeklyResult(new Date(`${plan.weekStart}T00:00:00`),plan).totalSessions>=(Number(plan.weeklySessions)||Infinity)).length;
+  let reachedDays=0,plannedDays=0; configured.forEach(plan=>{const result=weeklyResult(new Date(`${plan.weekStart}T00:00:00`),plan); plan.plannedDays.forEach(index=>{const day=addDays(result.start,index);if(day>=start&&day<end){plannedDays+=1;if((result.byDay.get(dateKey(day))||0)>=(Number(plan.dailySessions)||Infinity))reachedDays+=1;}});});
+  return {sessions:sessions.length,minutes,objective,percent:planPercent(sessions.length,objective),reachedWeeks,weeks:configured.length,reachedDays,plannedDays};
+}
+
+function renderMonthlySummary() {
+  const summary=monthSummary(monthYear,selectedMonth), label=new Date(monthYear,selectedMonth,1).toLocaleDateString("es-AR",{month:"long",year:"numeric"});
+  $("monthlySummary").innerHTML=`<div><small>Resumen mensual</small><strong>${label}</strong></div><span><b>${summary.sessions}</b> sesiones</span><span><b>${summary.objective||"—"}</b> objetivo acumulado</span><span><b>${summary.objective?`${summary.percent}%`:"—"}</b> cumplimiento</span><span><b>${formatMinutes(summary.minutes)}</b> enfocadas</span><span><b>${summary.reachedWeeks}/${summary.weeks}</b> semanas cumplidas</span><span><b>${summary.reachedDays}/${summary.plannedDays}</b> días al ritmo</span>`;
+}
+
+function renderMonthView() {
+  const grid=$("calendarGrid"); $("weekLabel").textContent=String(monthYear); renderMonthlySummary();
+  grid.innerHTML=`<div class="year-months">${Array.from({length:12},(_,month)=>{const rows=monthWeeks(monthYear,month);return `<section class="month-card ${month===selectedMonth?"selected":""}" data-select-month="${month}"><header><strong>${new Date(monthYear,month,1).toLocaleDateString("es-AR",{month:"long"})}</strong><small>${monthYear}</small></header><div class="month-weekdays">${DAYS.map(day=>`<span>${day.slice(0,1)}</span>`).join("")}<span>%</span></div>${rows.map(row=>{const plan=planForWeek(row[0]),result=weeklyResult(row[0],plan),target=Number(plan?.weeklySessions)||0,percent=planPercent(result.totalSessions,target);return `<div class="month-week-row">${row.map(day=>{const inMonth=day.getMonth()===month,items=inMonth?importantItemsForDay(day):[],classes=[...new Set(items.map(item=>item.kind))].join(" ");return `<button class="month-day ${inMonth?"":"outside"} ${dateKey(day)===dateKey(new Date())?"today":""} ${classes}" ${inMonth?`data-month-day="${dateKey(day)}"`:"disabled"}><span>${day.getDate()}</span>${items.length?`<i>${items.length}</i>`:""}</button>`;}).join("")}<em title="${target?`${result.totalSessions}/${target} sesiones`:"Sin plan"}">${target?`${percent}%`:"—"}<i style="width:${Math.min(100,percent)}%"></i></em></div>`;}).join("")}</section>`;}).join("")}</div>`;
+  grid.querySelectorAll("[data-select-month]").forEach(card=>card.querySelector("header").addEventListener("click",()=>{selectedMonth=Number(card.dataset.selectMonth);grid.querySelectorAll(".month-card").forEach(item=>item.classList.toggle("selected",item===card));renderMonthlySummary();card.scrollIntoView({behavior:"smooth",block:"start"});}));
+  grid.querySelectorAll("[data-month-day]").forEach(button=>button.addEventListener("click",()=>openMonthDay(button.dataset.monthDay)));
+  requestAnimationFrame(()=>grid.querySelector(`.month-card[data-select-month="${selectedMonth}"]`)?.scrollIntoView({block:"start"}));
+}
+
+function openMonthDay(key) {
+  const date=new Date(`${key}T00:00:00`),items=importantItemsForDay(date),result=weeklyResult(date),daySessions=completedSessionsInRange(date,addDays(date,1)),minutes=daySessions.reduce((sum,item)=>sum+sessionMinutes(item),0),plan=planForWeek(date),target=Number(plan?.dailySessions)||0,count=daySessions.length;
+  $("monthDayContent").innerHTML=`<div class="session-dialog-head"><div><span>${date.toLocaleDateString("es-AR",{weekday:"long"})}</span><h2>${date.toLocaleDateString("es-AR",{day:"numeric",month:"long",year:"numeric"})}</h2></div><button class="side-close" id="closeMonthDay" type="button">×</button></div><section class="session-dialog-section"><h3>Eventos</h3>${items.length?items.map(item=>`<div class="month-event ${item.kind}"><i></i><span>${escapeHtml(item.label)}</span></div>`).join(""):"<p>No hay eventos importantes.</p>"}</section><div class="channel-week-kpis month-day-kpis"><div><strong>${count}</strong><span>sesiones realizadas</span></div><div><strong>${formatMinutes(minutes)}</strong><span>tiempo enfocado</span></div><div><strong>${target?`${count}/${target}${count>=target?" ✓":""}`:"—"}</strong><span>ritmo orientativo</span></div></div><div class="weekly-plan-actions"><button class="tool-btn primary" id="openDayWeek" type="button">Abrir semana</button></div>`;
+  $("closeMonthDay").addEventListener("click",()=>$("monthDayDialog").close());
+  $("openDayWeek").addEventListener("click",()=>{$("monthDayDialog").close();weekStart=startOfWeek(date);setCalendarMode("week");});
+  $("monthDayDialog").showModal();
+}
+
+function setCalendarMode(mode) {
+  calendarMode=mode==="month"?"month":"week";
+  $("weekModeBtn").classList.toggle("active",calendarMode==="week"); $("monthModeBtn").classList.toggle("active",calendarMode==="month");
+  $("channelGoals").classList.toggle("hidden",calendarMode==="month"); $("monthlySummary").classList.toggle("hidden",calendarMode!=="month"); $("weeklyPlanBtn").classList.toggle("hidden",calendarMode==="month"); $("taskPlannerBtn").classList.toggle("hidden",calendarMode==="month");
+  $("calendarLayout").classList.toggle("month-mode",calendarMode==="month"); renderCalendar();
+}
+
 function moveRange(direction) {
+  if (calendarMode === "month") { monthYear += direction; renderCalendar(); return; }
   weekStart = addDays(weekStart, direction * visibleDays);
   selectedStart = null;
   selectedSessionId = null;
@@ -852,6 +1070,9 @@ function toggleRegisterMode() {
 
 $("prevWeekBtn").addEventListener("click", () => moveRange(-1));
 $("nextWeekBtn").addEventListener("click", () => moveRange(1));
+$("weekModeBtn").addEventListener("click", () => setCalendarMode("week"));
+$("monthModeBtn").addEventListener("click", () => setCalendarMode("month"));
+$("weeklyPlanBtn").addEventListener("click", () => openWeeklyPlan(weekStart));
 $("taskPlannerBtn").addEventListener("click", () => { taskPlannerOpen = !taskPlannerOpen; $("taskPlannerBtn").classList.toggle("active", taskPlannerOpen); renderTaskPlanner(); });
 $("calendarStatsBtn").addEventListener("click", () => ipcRenderer.send("open-stats"));
 $("googleCalendarBtn").addEventListener("click", () => { $("googleDialog").showModal(); refreshGoogleStatus(); });
@@ -865,12 +1086,21 @@ $("goalForm").addEventListener("submit", event => {
   const goals = readChannelGoals(); goals[editingGoalChannelId] = { dailyMinutes: Math.round(daily), weeklyMinutes: Math.round(weekly) };
   localStorage.setItem(CHANNEL_GOALS_KEY, JSON.stringify(goals)); ipcRenderer.send("data-changed"); $("goalDialog").close(); renderChannelGoals();
 });
+$("closeWeeklyPlan").addEventListener("click", () => $("weeklyPlanDialog").close());
+$("weeklyPlanForm").addEventListener("submit", saveWeeklyPlan);
+$("usePreviousPlan").addEventListener("click", () => fillWeeklyPlanForm(previousWeeklyPlan(new Date(`${$("weeklyPlanDialog").dataset.weekStart}T00:00:00`))));
+$("weeklySessionTarget").addEventListener("input", updateFlexibleSessions);
+$("weeklyChannelTargets").addEventListener("input", updateFlexibleSessions);
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 window.addEventListener("focus", renderCalendar);
-window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY].includes(event.key)) renderCalendar(); });
+window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) renderCalendar(); });
 
 renderTaskPlanner();
 renderCalendar();
+setTimeout(() => {
+  const currentKey=weekKey(new Date()), prompted=localStorage.getItem(WEEKLY_PROMPT_KEY);
+  if (!readWeeklyPlans()[currentKey] && prompted!==currentKey) { localStorage.setItem(WEEKLY_PROMPT_KEY,currentKey); openWeeklyPlan(new Date()); }
+}, 500);
 ipcRenderer.invoke("google-calendar-status").then(status => { if (status.connected) syncGoogleCalendar(false); });
 setInterval(() => {
   const now = new Date();
