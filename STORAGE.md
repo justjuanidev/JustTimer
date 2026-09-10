@@ -16,10 +16,13 @@ estable. Nunca borra ni reemplaza la carpeta anterior.
 El almacenamiento local conserva las claves versionadas siguientes:
 
 - `justtimer.sessions.v1`: sesiones e información usada para calcular estadísticas.
-- `justtimer.tasks.v1`: tareas de la sesión activa.
+- `justtimer.tasks.v1`: tareas de la sesión activa o pendientes para la siguiente sesión.
 - `justtimer.dayTasks.v1`: tareas generales y del día.
-- `justtimer.dailyPriorities.v1`: prioridades obligatorias, separadas por fecha local.
+- `justtimer.dailyPriorities.v1`: compatibilidad con prioridades guardadas de versiones anteriores.
 - `justtimer.projects.v1`: proyectos.
+- `justtimer.projectChannels.v1`: secciones visuales para organizar videos.
+- `justtimer.workChannels.v1`: canales de trabajo personalizables, nombre y foto de perfil.
+- `justtimer.workArea.v1`: canal predeterminado para nuevas sesiones (`JustJuani` o `Laburo`).
 - `justtimer.habits.v1` y claves relacionadas: hábitos y registros.
 - `justtimer.sessionTypes.v1`: tipos de sesión.
 - `justtimer.activeSession.v1`: recuperación de la sesión en curso.
@@ -27,6 +30,40 @@ El almacenamiento local conserva las claves versionadas siguientes:
 
 Las estadísticas no se guardan por separado: se calculan desde
 `justtimer.sessions.v1`, por lo que el historial de sesiones es su fuente de verdad.
+Cada sesión conserva además `workArea` y, opcionalmente, `projectId`: sin video se
+contabiliza como trabajo general del canal; con video suma a ese video y a su canal.
+Las tareas planificadas se guardan dentro de la sesión futura y se copian a
+`justtimer.tasks.v1` cuando esa sesión comienza.
+
+Las tareas importadas desde un video conservan `projectTaskId`. Cada sesión guarda
+su propio `focusedSecs`; la tarea original acumula esos aportes en `sessionFocus`,
+expone `sessionIds`/`sessionCount` y se completa automáticamente cuando se marca
+desde el timer. La primera tarea pendiente recibe el tiempo por defecto. Cambiarla
+o reordenar la lista solo cambia la atribución del tiempo: el reloj de la sesión
+continúa corriendo. Al cerrar una sesión, los pendientes pueden copiarse a la
+próxima sesión o permanecer en `justtimer.tasks.v1`.
+
+- `justtimer.channelGoals.v1`: objetivos editables de minutos diarios y semanales
+  por canal. El canal interno `routine` se muestra como “Personal”, usa una J como
+  avatar y participa en calendario/estadísticas, pero se oculta de la biblioteca
+  de Videos.
+
+El calendario incluye una lista lateral de tareas pendientes de los videos. Al
+asignar una tarea a una sesión conserva el mismo `projectTaskId`, por lo que su
+estado, cantidad de sesiones y tiempo acumulado continúan sincronizados con el
+video original.
+
+Las subtareas se guardan como tareas normales con `parentTaskId`, por lo que cada
+una puede acumular tiempo, completarse y asignarse a sesiones de manera
+independiente. Las secciones de proyectos guardan `orientation` (`horizontal` o
+`vertical`) y los proyectos pueden cambiar de canal conservando sus tareas y el
+historial de sesiones asociado.
+
+La pantalla inicial crea únicamente sesiones del canal interno `routine`. El
+calendario funciona como vista semanal y planificador: la creación manual y el
+registro retroactivo ya no forman parte de su interfaz. Los detalles históricos
+de cada sesión se muestran en un diálogo independiente para que no modifiquen el
+ancho del calendario.
 
 ## Compatibilidad futura
 

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Calendario</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="tool-light.css" />
 </head>
 <body class="tool-window">
   <div class="drag-bar">
@@ -12,47 +13,48 @@
   </div>
 
   <main class="tool-shell">
-    <div class="tool-header">
-      <div class="tool-title">Planificar sesion</div>
-      <div class="view-toggle" role="group" aria-label="Vista de calendario">
-        <button class="tool-btn view-btn active" id="weekViewBtn">Semana</button>
-        <button class="tool-btn view-btn" id="threeDayViewBtn">3 dias</button>
-      </div>
-      <button class="tool-btn primary" id="saveBtn">Crear sesion</button>
-    </div>
-
-    <div class="calendar-controls">
+    <div class="tool-header calendar-header">
+      <div class="calendar-controls compact-calendar-nav">
       <button class="tool-btn" id="prevWeekBtn" title="Semana anterior">&lt;</button>
-      <button class="tool-btn" id="nextWeekBtn" title="Semana siguiente">&gt;</button>
       <div class="week-label" id="weekLabel">--</div>
-      <button class="tool-btn" id="todayBtn">Hoy</button>
-      <button class="tool-btn" id="registerModeBtn">Registro</button>
-      <button class="tool-btn" id="googleCalendarBtn">Google Calendar</button>
+      <button class="tool-btn" id="nextWeekBtn" title="Semana siguiente">&gt;</button>
+      </div>
+      <div class="calendar-header-actions">
+        <button class="tool-btn google-calendar-icon" id="googleCalendarBtn" title="Google Calendar" aria-label="Google Calendar"><span></span></button>
+        <button class="tool-btn calendar-stats-icon" id="calendarStatsBtn" title="Estadísticas" aria-label="Estadísticas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></svg></button>
+        <button class="tool-btn task-planner-toggle" id="taskPlannerBtn" title="Lista de tareas">Tareas »</button>
+      </div>
     </div>
 
-    <section class="focusmate-goal" id="focusmateGoal"></section>
+    <section class="channel-goals" id="channelGoals"></section>
 
-    <div class="calendar-layout">
+    <div class="calendar-layout" id="calendarLayout">
       <section class="calendar-grid" id="calendarGrid" aria-label="Calendario semanal"></section>
-      <aside class="session-side-panel" id="sessionSidePanel">
-        <div class="side-empty">Selecciona una sesion para ver detalles</div>
-      </aside>
+      <aside class="task-planner-panel hidden" id="taskPlannerPanel"></aside>
     </div>
-
-    <div class="calendar-form">
-      <select class="tool-select" id="durationSelect">
-        <option value="25">25 min</option>
-        <option value="50" selected>50 min</option>
-        <option value="75">75 min</option>
-      </select>
-      <input class="tool-input" id="customDuration" type="number" min="1" max="480" placeholder="otro min" />
-      <input class="tool-input" id="labelInput" type="text" maxlength="40" placeholder="Nombre de Sesión" />
-      <button class="tool-btn" id="clearBtn">X</button>
-    </div>
-
-    <div class="selected-info" id="selectedInfo">Eleg&iacute; un bloque futuro de 15 minutos</div>
     <div class="error-msg hidden" id="calendarMsg"></div>
   </main>
+
+  <dialog class="session-record-dialog" id="sessionDialog">
+    <div id="sessionDialogContent"></div>
+  </dialog>
+
+  <dialog class="session-record-dialog task-session-dialog" id="taskSessionDialog">
+    <div id="taskSessionDialogContent"></div>
+  </dialog>
+
+  <dialog class="goal-dialog" id="goalDialog">
+    <form method="dialog" id="goalForm">
+      <div class="side-panel-head"><div><div class="side-title">Editar objetivo</div><div class="side-meta" id="goalChannelName"></div></div><button class="side-close" value="cancel">×</button></div>
+      <label>Objetivo diario (minutos)<input class="tool-input" id="goalDailyMinutes" type="number" min="1" max="1440" /></label>
+      <label>Objetivo semanal (minutos)<input class="tool-input" id="goalWeeklyMinutes" type="number" min="1" max="10080" /></label>
+      <button class="tool-btn primary" id="saveGoalBtn" value="default">Guardar objetivo</button>
+    </form>
+  </dialog>
+
+  <dialog class="session-record-dialog channel-stats-dialog" id="channelStatsDialog">
+    <div id="channelStatsDialogContent"></div>
+  </dialog>
 
   <dialog class="habit-dialog google-calendar-dialog" id="googleDialog">
     <form class="habit-form" method="dialog">

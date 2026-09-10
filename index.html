@@ -11,21 +11,8 @@
     <span class="close-btn" id="closeBtn" title="Cerrar">&times;</span>
   </div>
 
-  <div class="panel hidden" id="panelDailyPriorities">
-    <div class="daily-priority-title">Tus prioridades de hoy</div>
-    <div class="daily-priority-help">Antes de iniciar sesiones, anotá al menos 3 tareas importantes. Podés agregar todas las que necesites.</div>
-    <div class="daily-priority-list" id="dailyPriorityList"></div>
-    <button class="daily-add-btn" id="addDailyPriorityBtn" type="button">+ agregar otra</button>
-    <div class="error-msg hidden" id="dailyPriorityError"></div>
-    <label class="startup-setting">
-      <input type="checkbox" id="startupDailyCheck" />
-      <span>Abrir JustTimer al iniciar Windows</span>
-    </label>
-    <button class="start-session-btn" id="saveDailyPrioritiesBtn" type="button">GUARDAR PRIORIDADES</button>
-  </div>
-
   <div class="panel" id="panelSetup">
-    <div class="section-label">&iquest;De cu&aacute;nto es la sesi&oacute;n?</div>
+    <div class="section-label setup-duration-title">&iquest;De cu&aacute;nto es la sesi&oacute;n?</div>
     <div class="btn-row" id="durRow">
       <button class="dur-btn" data-mins="25">25&prime;</button>
       <button class="dur-btn" data-mins="50">50&prime;</button>
@@ -37,11 +24,6 @@
       <button id="customDurOk">ok</button>
     </div>
 
-    <select class="session-project-select" id="sessionProjectSelect" title="Proyecto de esta sesión">
-      <option value="">Sin proyecto</option>
-    </select>
-
-    <div class="section-label">&iquest;A qu&eacute; hora?</div>
     <div class="quarter-grid" id="quarterGrid"></div>
 
     <div class="session-summary" id="sessionSummary"></div>
@@ -53,30 +35,20 @@
 
     <div class="error-msg hidden" id="errorMsg"></div>
 
-    <label class="startup-setting setup-startup-setting">
-      <input type="checkbox" id="startupSetupCheck" />
-      <span>Abrir al iniciar Windows</span>
-    </label>
-
     <div class="bottom-row">
       <button class="icon-btn" id="calBtn" title="Calendario">
         <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
       </button>
-      <button class="icon-btn" id="tasksSetupBtn" title="Tareas">
-        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-5"/><path d="M5 3 2 6"/><path d="m19 3 3 3"/>
+      <button class="icon-btn" id="projectsSetupBtn" title="Videos y proyectos">
+        <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/>
         </svg>
       </button>
       <button class="icon-btn" id="habitsBtn" title="Habitos">
         <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-        </svg>
-      </button>
-      <button class="icon-btn" id="statsBtn" title="Analitica">
-        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-4"/><path d="M12 16V8"/><path d="M16 16v-7"/>
         </svg>
       </button>
       <button class="start-session-btn" id="startNowBtn">INICIAR</button>
@@ -92,6 +64,7 @@
 
   <div class="panel hidden" id="panelTimer">
     <div class="countdown-big" id="timerLabel">--:--</div>
+    <div class="current-task-label hidden" id="currentTaskLabel"><span>Ahora</span><strong id="currentTaskText"></strong><small id="currentTaskTime">0 min</small></div>
     <div class="progress-bar-wrap">
       <div class="progress-bar-fill" id="progressFill"></div>
     </div>
@@ -101,9 +74,14 @@
           <path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8h1a4 4 0 0 1 0 8h-1"/><path d="M5 8h11v7a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5Z"/><path d="M6 20h12"/>
         </svg>
       </button>
-      <button class="icon-btn timer-action-btn" id="tasksTimerBtn" title="Tareas">
+      <button class="icon-btn timer-action-btn" id="tasksTimerBtn" title="Plan de sesión">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-5"/><path d="M5 3 2 6"/><path d="m19 3 3 3"/>
+          <path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>
+        </svg>
+      </button>
+      <button class="icon-btn timer-action-btn" id="projectsTimerBtn" title="Videos y proyectos">
+        <svg xmlns="http://www.w3.org/2000/svg" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/>
         </svg>
       </button>
       <button class="icon-btn timer-action-btn" id="calTimerBtn" title="Calendario">
@@ -119,22 +97,28 @@
     </div>
   </div>
 
+  <section class="inline-session-tasks hidden" id="inlineTasksPanel">
+    <div class="inline-tasks-head"><strong>Plan de la sesión</strong><div><button id="openFullTasks" title="Abrir videos y proyectos">↗</button><button id="closeInlineTasks" title="Cerrar">×</button></div></div>
+    <form class="inline-task-add" id="inlineTaskForm"><input id="inlineTaskInput" maxlength="90" placeholder="Agregar tarea a esta sesión" /><button type="submit">+</button></form>
+    <div class="inline-task-list" id="inlineTaskList"></div>
+  </section>
+
   <div class="panel hidden" id="panelReview">
     <div class="review-title">Sesion terminada</div>
-    <label class="review-label" for="reviewProject">proyecto</label>
-    <select class="review-input" id="reviewProject"><option value="">Sin proyecto</option></select>
-    <label class="review-label" for="reviewType">tipo</label>
-    <div class="review-type-row">
-      <select class="review-input" id="reviewType"></select>
-      <button class="mini-icon-btn" id="addTypeBtn" title="Agregar tipo">+</button>
-      <button class="mini-icon-btn" id="deleteTypeBtn" title="Eliminar tipo">&times;</button>
-    </div>
-    <div class="custom-type-row hidden" id="customTypeRow">
-      <input class="review-input" id="customTypeInput" type="text" maxlength="32" placeholder="nuevo tipo" />
-      <button class="tool-btn primary" id="saveTypeBtn">ok</button>
+    <label class="review-label" for="reviewWorkArea">canal y video</label>
+    <div class="review-assignment-row">
+      <select class="review-input" id="reviewWorkArea"><option value="personal">JustJuani</option><option value="work">Laburo</option></select>
+      <select class="review-input" id="reviewProject"><option value="">Trabajo general del canal</option></select>
     </div>
     <label class="review-label">tareas</label>
     <div class="review-task-list" id="reviewTaskList"></div>
+    <label class="review-carry-row hidden" id="reviewCarryRow">Tareas sin terminar
+      <select class="review-input" id="reviewCarryMode">
+        <option value="next">Pasarlas a la próxima sesión</option>
+        <option value="pending">Dejarlas pendientes en el video</option>
+      </select>
+      <small id="reviewCarryHelp"></small>
+    </label>
     <label class="review-label" for="reviewNotes">notas</label>
     <textarea class="review-textarea" id="reviewNotes" rows="5" placeholder="Que hiciste en esta sesion"></textarea>
     <div class="review-label center">nivel de energia en la sesion</div>

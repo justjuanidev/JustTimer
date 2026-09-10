@@ -30,6 +30,8 @@
       "stats.js",
       "day.js",
       "styles.css",
+      "tool-light.css",
+      "project.css",
       "STORAGE.md",
       "logo.ico",
       "sonidos/**/*",

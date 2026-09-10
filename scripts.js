@@ -5,9 +5,10 @@ const TASKS_KEY = "justtimer.tasks.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
 const SESSION_TYPES_KEY = "justtimer.sessionTypes.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
+const WORK_CHANNELS_KEY = "justtimer.workChannels.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
-const DEFAULT_DURATION_SECS = 50 * 60;
+const DEFAULT_DURATION_SECS = 75 * 60;
 
 const SKY_PHASES = [
   { h: 0, colors: ["rgba(10,10,26,0.92)", "rgba(13,27,62,0.92)", "rgba(26,26,46,0.92)"] },
@@ -34,6 +35,11 @@ let activeBreakStart = null;
 let breakSegments = [];
 let waitWarnPlayed = false;
 let timerWarnPlayed = false;
+let activeTaskId = null;
+let activeTaskStartedAt = null;
+let lastTaskCheckpointAt = 0;
+let lastSessionPersistAt = 0;
+let pendingSessionsSignature = "";
 const soundCache = new Map();
 
 function $(id) {
@@ -79,6 +85,131 @@ function readTasks() {
 function writeTasks(tasks) {
   localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
   ipcRenderer.send("data-changed");
+}
+
+function readProjectTasks() {
+  const value = readJson(DAY_TASKS_KEY, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function linkedProjectTaskId(task) {
+  return task.projectTaskId || task.movedFromDayTaskId || null;
+}
+
+function syncProjectTasksFromSession(sessionTasks = readTasks(), sessionId = activePendingSessionId) {
+  if (!sessionId) return;
+  const byProjectTask = new Map(sessionTasks.filter(task => linkedProjectTaskId(task)).map(task => [linkedProjectTaskId(task), task]));
+  if (!byProjectTask.size) return;
+  let changed = false;
+  const next = readProjectTasks().map(projectTask => {
+    const sessionTask = byProjectTask.get(projectTask.id);
+    if (!sessionTask) return projectTask;
+    const sessionFocus = { ...(projectTask.sessionFocus || {}) };
+    sessionFocus[sessionId] = Math.max(0, Number(sessionTask.focusedSecs) || 0);
+    const sessionIds = [...new Set([...(projectTask.sessionIds || []), sessionId])];
+    const updated = {
+      ...projectTask,
+      text: sessionTask.text || projectTask.text,
+      priority: sessionTask.priority || projectTask.priority,
+      done: Boolean(sessionTask.done || projectTask.done),
+      completedAt: sessionTask.done ? (sessionTask.completedAt || projectTask.completedAt || new Date().toISOString()) : projectTask.completedAt,
+      sessionFocus,
+      sessionIds,
+      sessionCount: sessionIds.length,
+      focusedSecs: Object.values(sessionFocus).reduce((sum, secs) => sum + (Number(secs) || 0), 0),
+      updatedAt: new Date().toISOString(),
+    };
+    changed = true;
+    return updated;
+  });
+  if (changed) {
+    localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(next));
+    ipcRenderer.send("data-changed");
+  }
+}
+
+function reconcileProjectTaskHistory() {
+  const contributions = new Map();
+  readSessions().forEach(session => (session.tasks || []).forEach(task => {
+    const taskId = linkedProjectTaskId(task);
+    if (!taskId) return;
+    if (!contributions.has(taskId)) contributions.set(taskId, []);
+    contributions.get(taskId).push({ session, task });
+  }));
+  if (!contributions.size) return;
+  let changed = false;
+  const next = readProjectTasks().map(projectTask => {
+    const records = contributions.get(projectTask.id);
+    if (!records?.length) return projectTask;
+    const sessionFocus = { ...(projectTask.sessionFocus || {}) };
+    records.forEach(({ session, task }) => { sessionFocus[session.id] = Math.max(Number(sessionFocus[session.id]) || 0, Number(task.focusedSecs) || 0); });
+    const sessionIds = [...new Set([...(projectTask.sessionIds || []), ...records.map(record => record.session.id)])];
+    const completed = records.find(record => record.task.done);
+    changed = true;
+    return {
+      ...projectTask,
+      done: Boolean(projectTask.done || completed),
+      completedAt: projectTask.completedAt || completed?.task.completedAt || null,
+      sessionFocus,
+      sessionIds,
+      sessionCount: sessionIds.length,
+      focusedSecs: Object.values(sessionFocus).reduce((sum, secs) => sum + (Number(secs) || 0), 0),
+    };
+  });
+  if (changed) localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(next));
+}
+
+function sessionTaskElapsed(task, now = Date.now()) {
+  const stored = Math.max(0, Number(task?.focusedSecs) || 0);
+  return task?.id === activeTaskId && activeTaskStartedAt && timerRunning && !breakActive
+    ? stored + Math.max(0, Math.floor((now - activeTaskStartedAt.getTime()) / 1000))
+    : stored;
+}
+
+function checkpointActiveTaskTime(now = new Date()) {
+  if (!activeTaskId || !activeTaskStartedAt || !timerRunning || breakActive) return;
+  const delta = Math.max(0, Math.floor((now - activeTaskStartedAt) / 1000));
+  if (!delta) return;
+  const next = readTasks().map(task => task.id === activeTaskId ? { ...task, focusedSecs: (Number(task.focusedSecs) || 0) + delta } : task);
+  activeTaskStartedAt = now;
+  lastTaskCheckpointAt = now.getTime();
+  writeTasks(next);
+  if (activePendingSessionId) { updateSession(activePendingSessionId, { tasks: next, activeTaskId }); lastSessionPersistAt = now.getTime(); }
+  syncProjectTasksFromSession(next);
+}
+
+function chooseDefaultActiveTask() {
+  const first = readTasks().find(task => !task.deleted && !task.done);
+  activeTaskId = first?.id || null;
+  activeTaskStartedAt = activeTaskId && timerRunning && !breakActive ? new Date() : null;
+  renderCurrentTask();
+}
+
+function setActiveTask(taskId) {
+  if (taskId === activeTaskId) return;
+  checkpointActiveTaskTime();
+  activeTaskId = readTasks().some(task => task.id === taskId && !task.done && !task.deleted) ? taskId : null;
+  activeTaskStartedAt = activeTaskId && timerRunning && !breakActive ? new Date() : null;
+  if (activePendingSessionId) updateSession(activePendingSessionId, { activeTaskId });
+  renderInlineTasks();
+  renderCurrentTask();
+}
+
+function renderCurrentTask() {
+  const task = readTasks().find(item => item.id === activeTaskId && !item.done && !item.deleted);
+  const box = $("currentTaskLabel");
+  if (!box) return;
+  box.classList.toggle("hidden", !task);
+  if (!task) return;
+  $("currentTaskText").textContent = task.text;
+  $("currentTaskTime").textContent = formatTaskDuration(sessionTaskElapsed(task));
+}
+
+function formatTaskDuration(secs) {
+  const safe = Math.max(0, Math.floor(Number(secs) || 0));
+  if (safe < 60) return `${safe} s`;
+  const hours = Math.floor(safe / 3600), mins = Math.floor((safe % 3600) / 60);
+  return hours ? `${hours} h ${mins} min` : `${mins} min`;
 }
 
 function todayKey(date = new Date()) {
@@ -166,9 +297,7 @@ function showDailyPrioritiesPanel() {
 }
 
 function requireDailyPriorities() {
-  if (hasDailyPriorities()) return true;
-  showDailyPrioritiesPanel();
-  return false;
+  return true;
 }
 
 function saveDailyPriorities() {
@@ -240,19 +369,44 @@ function readProjects() {
   }
 }
 
-function renderProjectSelects(selectedId = "") {
+function readWorkChannels() {
+  let channels = [];
+  try { const parsed = JSON.parse(localStorage.getItem(WORK_CHANNELS_KEY) || "[]"); channels = Array.isArray(parsed) ? parsed : []; } catch {}
+  [{ id: "personal", name: "JustJuani", order: 0 }, { id: "work", name: "Laburo", order: 1 }, { id: "routine", name: "Personal", order: 999, hiddenFromVideos: true }].forEach(item => { if (!channels.some(channel => channel.id === item.id)) channels.push(item); });
+  return channels.sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+function projectWorkChannel(project) { return project?.workChannelId || project?.mode || "personal"; }
+
+function workAreaLabel(value) {
+  return readWorkChannels().find(channel => channel.id === value)?.name || (value === "work" ? "Laburo" : "JustJuani");
+}
+
+function fillWorkAreaSelect(select, selectedArea) {
+  if (!select) return;
+  select.innerHTML = readWorkChannels().map(channel => `<option value="${channel.id}">${channel.name}</option>`).join("");
+  select.value = readWorkChannels().some(channel => channel.id === selectedArea) ? selectedArea : "personal";
+}
+
+function fillVideoSelect(select, area, selectedId = "") {
+  if (!select) return;
   const projects = readProjects().filter(project => !project.archived);
-  [$("sessionProjectSelect"), $("reviewProject")].filter(Boolean).forEach(select => {
-    const current = selectedId || select.value;
-    select.innerHTML = `<option value="">Sin proyecto</option>`;
-    projects.forEach(project => {
+  const current = selectedId || select.value;
+  select.innerHTML = `<option value="">Trabajo general de ${workAreaLabel(area)}</option>`;
+  projects.filter(project => projectWorkChannel(project) === area).forEach(project => {
       const option = document.createElement("option");
       option.value = project.id;
       option.textContent = project.title;
       select.appendChild(option);
-    });
-    select.value = projects.some(project => project.id === current) ? current : "";
   });
+  select.value = projects.some(project => project.id === current && projectWorkChannel(project) === area) ? current : "";
+}
+
+function renderProjectSelects(selectedId = "", selectedArea = null) {
+  const project = readProjects().find(item => item.id === selectedId);
+  const area = selectedArea || (project ? projectWorkChannel(project) : null) || localStorage.getItem("justtimer.workArea.v1") || "personal";
+  [$("sessionWorkArea"), $("reviewWorkArea")].filter(Boolean).forEach(select => fillWorkAreaSelect(select, area));
+  fillVideoSelect($("sessionProjectSelect"), area, selectedId);
+  fillVideoSelect($("reviewProject"), area, selectedId);
 }
 
 function writeActiveSession(value) {
@@ -351,7 +505,7 @@ function fmtCountdown(secs) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function nextQuarters(n = 6) {
+function nextQuarters(n = 4) {
   const now = new Date();
   const base = new Date(now);
   base.setSeconds(0, 0);
@@ -394,7 +548,9 @@ function sendHeight(force = false) {
         const rect = child.getBoundingClientRect();
         return Math.max(max, rect.bottom - panelRect.top);
       }, 0);
-      const total = Math.ceil(activePanel.offsetTop + bottom + paddingBottom);
+      const drawer = $("inlineTasksPanel");
+      const drawerBottom = drawer && !drawer.classList.contains("hidden") ? drawer.getBoundingClientRect().bottom : 0;
+      const total = Math.ceil(Math.max(activePanel.offsetTop + bottom + paddingBottom, drawerBottom + 8));
       if (force || total !== _lastSentHeight) {
         _lastSentHeight = total;
         ipcRenderer.send("resize", total);
@@ -424,13 +580,14 @@ function initResizeObserver() {
   const ro = new ResizeObserver(() => {
     requestAnimationFrame(() => requestAnimationFrame(sendHeight));
   });
-  ["panelDailyPriorities", "panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(id => ro.observe($(id)));
+  ["panelSetup", "panelWait", "panelTimer", "panelReview", "inlineTasksPanel"].forEach(id => ro.observe($(id)));
 }
 
 function showPanel(id) {
-  ["panelDailyPriorities", "panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(panelId => {
+  ["panelSetup", "panelWait", "panelTimer", "panelReview"].forEach(panelId => {
     $(panelId).classList.toggle("hidden", panelId !== id);
   });
+  if (!["panelSetup", "panelTimer"].includes(id)) $("inlineTasksPanel").classList.add("hidden");
   resizeWindow();
 }
 
@@ -439,7 +596,7 @@ function buildQuarterButtons() {
   grid.innerHTML = "";
   const now = new Date();
 
-  nextQuarters(7).forEach(time => {
+  nextQuarters(4).forEach(time => {
     const btn = document.createElement("button");
     btn.className = "quarter-btn" + (time <= now ? " past" : "");
     btn.textContent = fmtHour(time);
@@ -447,14 +604,6 @@ function buildQuarterButtons() {
     grid.appendChild(btn);
   });
 
-  // Add Planificar as the 8th slot in the grid
-  const planBtn = document.createElement("button");
-  planBtn.className = "quarter-btn planificar-inline-btn";
-  planBtn.id = "planificarBtnGrid";
-  planBtn.title = "Planificar sesión futura";
-  planBtn.textContent = "＋";
-  planBtn.addEventListener("click", () => ipcRenderer.send("open-calendar"));
-  grid.appendChild(planBtn);
 }
 
 function selectQuarter(time, btn) {
@@ -477,9 +626,8 @@ function getPendingSessions() {
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
 }
 
-function updateSessionSummary() {
+function updateSessionSummary(pending = getPendingSessions()) {
   const today = new Date();
-  const pending = getPendingSessions();
   const todayCount = pending.filter(session => isSameDay(new Date(session.startAt), today)).length;
   $("sessionSummary").textContent = todayCount === 1
     ? "Tienes 1 sesion hoy"
@@ -488,8 +636,12 @@ function updateSessionSummary() {
       : "";
 
   renderNextSession(pending[0]);
-  renderPendingSessions(pending);
-  resizeWindow();
+  const signature = pending.slice(0, 4).map(session => `${session.id}:${session.startAt}:${session.durationSecs}:${session.workArea}:${session.projectId}`).join("|");
+  if (signature !== pendingSessionsSignature) {
+    pendingSessionsSignature = signature;
+    renderPendingSessions(pending);
+    resizeWindow();
+  }
 }
 
 function renderNextSession(session) {
@@ -525,8 +677,10 @@ function renderPendingSessions(pending) {
     const start = new Date(session.startAt);
     const row = document.createElement("div");
     row.className = "pending-row";
+    const channel = readWorkChannels().find(item => item.id === (session.workArea || "personal")) || { name: workAreaLabel(session.workArea), avatarUrl: null };
+    const avatar = channel.avatarUrl ? `<img src="${channel.avatarUrl}" alt="" />` : `<b>${channel.id === "routine" ? "J" : (channel.name || "J").slice(0, 1).toUpperCase()}</b>`;
     row.innerHTML = `
-      <span>${fmtHour(start)} · ${Math.round(session.durationSecs / 60)} min</span>
+      <span class="pending-avatar">${avatar}</span><span class="pending-copy"><strong>${fmtHour(start)} · ${Math.round(session.durationSecs / 60)} min</strong><small>${channel.name}${session.projectName ? ` · ${session.projectName}` : ""}</small></span>
       <button type="button" data-id="${session.id}" title="Cancelar">&times;</button>
     `;
     list.appendChild(row);
@@ -534,14 +688,18 @@ function renderPendingSessions(pending) {
   resizeWindow();
 }
 
-function autoStartPendingSessions() {
+function autoStartPendingSessions(pending = getPendingSessions()) {
   if (timerRunning || waiting) return;
 
-  const due = getPendingSessions().find(session => new Date(session.startAt) <= new Date());
+  const due = pending.find(session => new Date(session.startAt) <= new Date());
   if (!due) return;
   if (!requireDailyPriorities()) return;
 
   activePendingSessionId = due.id;
+  const backlog = readTasks().filter(task => !task.done && !task.deleted);
+  const planned = Array.isArray(due.tasks) ? due.tasks.map(task => ({ ...task, projectTaskId: linkedProjectTaskId(task) })) : [];
+  const plannedLinks = new Set(planned.map(task => linkedProjectTaskId(task) || task.id));
+  writeTasks([...planned, ...backlog.filter(task => !plannedLinks.has(linkedProjectTaskId(task) || task.id)).map(task => ({ ...task, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, focusedSecs: 0 }))]);
   updateSession(due.id, { status: "running" });
   durationSecs = due.durationSecs;
   startAt = new Date(due.startAt);
@@ -559,17 +717,20 @@ function startSelectedNow() {
 
 function createRunningSession(startDt) {
   const sessions = readSessions();
-  const projectId = $("sessionProjectSelect")?.value || null;
+  const workArea = "routine";
+  const projectId = null;
   const project = readProjects().find(item => item.id === projectId);
   const session = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     startAt: startDt.toISOString(),
     durationSecs,
     label: "",
+    workArea,
+    workAreaName: workAreaLabel(workArea),
     projectId,
     projectName: project?.title || null,
     status: "running",
-    tasks: [],
+    tasks: readTasks(),
     notes: "",
     energy: null,
     breakSegments: [],
@@ -579,6 +740,7 @@ function createRunningSession(startDt) {
   sessions.push(session);
   writeSessions(sessions);
   activePendingSessionId = session.id;
+  syncProjectTasksFromSession(session.tasks, session.id);
 }
 
 function markSessionRunning() {
@@ -663,8 +825,13 @@ function startTimer(remaining) {
   timerRunning = true;
   waiting = false;
   timerWarnPlayed = false;
+  const savedActive = readSessions().find(session => session.id === activePendingSessionId)?.activeTaskId;
+  activeTaskId = readTasks().some(task => task.id === savedActive && !task.done && !task.deleted) ? savedActive : (readTasks().find(task => !task.done && !task.deleted)?.id || null);
+  activeTaskStartedAt = activeTaskId && !breakActive ? new Date() : null;
+  lastTaskCheckpointAt = Date.now();
   playSound("start");
   showPanel("panelTimer");
+  renderCurrentTask();
   tickTimer();
 }
 
@@ -672,22 +839,32 @@ function tickTimer() {
   if (!timerRunning) return;
 
   const remaining = Math.max(0, (endAt - Date.now()) / 1000);
+  const liveTasks = readTasks();
+  if (!liveTasks.some(task => task.id === activeTaskId && !task.done && !task.deleted)) {
+    activeTaskId = liveTasks.find(task => !task.done && !task.deleted)?.id || null;
+    activeTaskStartedAt = activeTaskId && !breakActive ? new Date() : null;
+  }
   $("timerLabel").textContent = fmtCountdown(remaining);
   $("timerLabel").style.color = remaining <= 60 ? "#ff4444" : "white";
   $("progressFill").style.width = `${((durationSecs - remaining) / durationSecs) * 100}%`;
+  renderCurrentTask();
+  if (Date.now() - lastTaskCheckpointAt >= 5000) checkpointActiveTaskTime();
   if (remaining <= 60 && !timerWarnPlayed) {
     timerWarnPlayed = true;
     playSound("sound_warn");
   }
-  if (activePendingSessionId) {
+  if (activePendingSessionId && Date.now() - lastSessionPersistAt >= 5000) {
     updateSession(activePendingSessionId, {
       breakSegments,
       breakTotalSecs: getBreakTotalSecs(),
       tasks: readTasks(),
+      activeTaskId,
     });
+    lastSessionPersistAt = Date.now();
   }
 
   if (remaining <= 0) {
+    checkpointActiveTaskTime();
     timerRunning = false;
     $("timerLabel").textContent = "00:00";
     $("progressFill").style.width = "100%";
@@ -744,14 +921,34 @@ function buildEnergyButtons() {
 
 function openReviewPanel() {
   closeOpenBreak();
-  renderSessionTypeSelect();
   const current = readSessions().find(session => session.id === activePendingSessionId);
-  renderProjectSelects(current?.projectId || "");
+  renderProjectSelects(current?.projectId || "", current?.workArea || null);
   renderReviewTasks();
+  renderReviewCarryOptions(current);
   $("reviewNotes").value = "";
   reviewEnergy = 5;
   buildEnergyButtons();
   showPanel("panelReview");
+}
+
+function nextPendingSession(currentSession) {
+  const currentStart = new Date(currentSession?.startAt || 0).getTime();
+  return readSessions()
+    .filter(session => session.id !== currentSession?.id && session.status === "pending" && new Date(session.startAt).getTime() > currentStart)
+    .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))[0] || null;
+}
+
+function renderReviewCarryOptions(currentSession) {
+  const pending = readTasks().filter(task => !task.deleted && !task.done);
+  const row = $("reviewCarryRow"), next = nextPendingSession(currentSession);
+  row.classList.toggle("hidden", !pending.length);
+  if (!pending.length) return;
+  const nextOption = $("reviewCarryMode").querySelector('option[value="next"]');
+  nextOption.disabled = !next;
+  $("reviewCarryMode").value = next ? "next" : "pending";
+  $("reviewCarryHelp").textContent = next
+    ? `Próxima: ${new Date(next.startAt).toLocaleString("es-AR", { weekday: "short", hour: "2-digit", minute: "2-digit" })}`
+    : "No hay otra sesión futura: quedarán pendientes dentro del video.";
 }
 
 function renderSessionTypeSelect(selected = "") {
@@ -786,10 +983,11 @@ function renderReviewTasks() {
     row.dataset.taskId = task.id;
     row.innerHTML = `
       <input type="checkbox" ${task.done ? "checked" : ""} />
-      <span></span>
+      <span></span><small class="review-task-time"></small>
       <textarea class="review-task-note" rows="2" placeholder="nota de tarea"></textarea>
     `;
     row.querySelector("span").textContent = task.text;
+    row.querySelector(".review-task-time").textContent = formatTaskDuration(sessionTaskElapsed(task));
     row.querySelector("textarea").value = task.notes || "";
     list.appendChild(row);
   });
@@ -835,25 +1033,51 @@ function collectReviewTasks() {
 
 function finishSession({ skip = false } = {}) {
   closeOpenBreak();
+  checkpointActiveTaskTime();
   const reviewedTasks = skip ? readTasks() : collectReviewTasks();
+  const current = activePendingSessionId ? readSessions().find(session => session.id === activePendingSessionId) : null;
+  const unfinished = reviewedTasks.filter(task => !task.deleted && !task.done);
+  const next = current && !skip && $("reviewCarryMode").value === "next" ? nextPendingSession(current) : null;
+  const keepPending = unfinished.map(task => ({ ...task, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, focusedSecs: 0, carriedFromSessionId: activePendingSessionId }));
   if (activePendingSessionId) {
+    const workArea = skip ? (current?.workArea || "personal") : ($("reviewWorkArea").value || "personal");
+    const selectedProjectId = skip ? (current?.projectId || null) : ($("reviewProject").value || null);
     updateSession(activePendingSessionId, {
       status: "done",
       completedAt: new Date().toISOString(),
       endedAt: new Date().toISOString(),
-      label: skip ? "" : $("reviewType").value,
-      projectId: skip ? null : ($("reviewProject").value || null),
-      projectName: skip ? null : (readProjects().find(project => project.id === $("reviewProject").value)?.title || null),
+      label: "",
+      workArea,
+      workAreaName: workAreaLabel(workArea),
+      projectId: selectedProjectId,
+      projectName: readProjects().find(project => project.id === selectedProjectId)?.title || null,
       notes: skip ? "" : $("reviewNotes").value.trim(),
       energy: skip ? null : reviewEnergy,
       tasks: reviewedTasks,
       breakSegments,
       breakTotalSecs: getBreakTotalSecs(),
     });
+    syncProjectTasksFromSession(reviewedTasks, activePendingSessionId);
+    if (next && unfinished.length) {
+      const existingLinks = new Set((next.tasks || []).map(task => linkedProjectTaskId(task) || task.id));
+      const carried = unfinished.filter(task => !existingLinks.has(linkedProjectTaskId(task) || task.id)).map(task => ({
+        ...task,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        done: false,
+        completedAt: null,
+        focusedSecs: 0,
+        carriedFromSessionId: activePendingSessionId,
+        projectTaskId: linkedProjectTaskId(task),
+      }));
+      updateSession(next.id, { tasks: [...(next.tasks || []), ...carried] });
+      syncProjectTasksFromSession(carried, next.id);
+    }
   }
+  activeTaskId = null;
+  activeTaskStartedAt = null;
   activePendingSessionId = null;
   writeActiveSession(null);
-  writeTasks([]);
+  writeTasks(next ? [] : keepPending);
   resetBreakState();
   buildQuarterButtons();
   updateSessionSummary();
@@ -892,21 +1116,6 @@ $("customDurInput").addEventListener("keydown", event => {
 });
 
 $("startNowBtn").addEventListener("click", startSelectedNow);
-$("addDailyPriorityBtn").addEventListener("click", () => {
-  addDailyPriorityInput();
-  resizeWindow();
-  $("dailyPriorityList").lastElementChild?.querySelector("input")?.focus();
-});
-$("saveDailyPrioritiesBtn").addEventListener("click", saveDailyPriorities);
-
-async function setStartupSetting(enabled) {
-  const result = await ipcRenderer.invoke("set-startup-setting", enabled);
-  [$("startupDailyCheck"), $("startupSetupCheck")].forEach(input => { input.checked = Boolean(result?.enabled); });
-}
-
-[$("startupDailyCheck"), $("startupSetupCheck")].forEach(input => {
-  input.addEventListener("change", () => setStartupSetting(input.checked));
-});
 
 $("waitCancelBtn").addEventListener("click", () => {
   waiting = false;
@@ -919,7 +1128,9 @@ function toggleBreak() {
   if (!timerRunning) return;
   if (breakActive) {
     closeOpenBreak();
+    activeTaskStartedAt = activeTaskId ? new Date() : null;
   } else {
+    checkpointActiveTaskTime();
     breakActive = true;
     activeBreakStart = new Date();
     document.body.classList.add("break-mode");
@@ -936,6 +1147,7 @@ function cancelRunningSessionToHome() {
   if (!window.confirm("Cancelar sesion?")) return;
 
   const now = new Date();
+  checkpointActiveTaskTime(now);
   const elapsedSecs = timerRunning ? Math.max(1, Math.min(durationSecs, getElapsedSecs(now.getTime()))) : 0;
   closeOpenBreak(now);
   clearTimeout(timerJob);
@@ -953,12 +1165,15 @@ function cancelRunningSessionToHome() {
       cancelledEarly: true,
       originalDurationSecs: durationSecs,
     });
+    syncProjectTasksFromSession(readTasks(), activePendingSessionId);
     ipcRenderer.send("session-created");
   }
 
   timerRunning = false;
   waiting = false;
   activePendingSessionId = null;
+  activeTaskId = null;
+  activeTaskStartedAt = null;
   writeActiveSession(null);
   writeTasks([]);
   resetBreakState();
@@ -971,50 +1186,86 @@ $("breakBtn").addEventListener("click", toggleBreak);
 $("homeBtn").addEventListener("click", cancelRunningSessionToHome);
 $("saveReviewBtn").addEventListener("click", () => finishSession());
 $("skipReviewBtn").addEventListener("click", () => finishSession({ skip: true }));
-$("addTypeBtn").addEventListener("click", () => {
-  $("customTypeRow").classList.toggle("hidden");
-  if (!$("customTypeRow").classList.contains("hidden")) $("customTypeInput").focus();
-});
-$("saveTypeBtn").addEventListener("click", () => {
-  const value = $("customTypeInput").value.trim();
-  if (!value) return;
-  writeSessionTypes([...readSessionTypes(), value]);
-  $("customTypeInput").value = "";
-  $("customTypeRow").classList.add("hidden");
-  renderSessionTypeSelect(value);
-});
-$("customTypeInput").addEventListener("keydown", event => {
-  if (event.key === "Enter") $("saveTypeBtn").click();
-});
-$("deleteTypeBtn").addEventListener("click", () => {
-  const current = $("reviewType").value;
-  const next = readSessionTypes().filter(type => type !== current);
-  writeSessionTypes(next);
-  renderSessionTypeSelect(next[0]);
-});
 
 function openCalendar() {
   ipcRenderer.send("open-calendar");
 }
 
 function openTasks() {
-  ipcRenderer.send("open-tasks");
+  ipcRenderer.send("open-day-tasks");
+}
+
+function priorityLabel(priority) { return priority === "high" ? "Urgente" : priority === "low" ? "Baja" : "Normal"; }
+function persistInlineTasks(nextTasks) {
+  writeTasks(nextTasks);
+  if (activePendingSessionId) updateSession(activePendingSessionId, { tasks: nextTasks });
+  syncProjectTasksFromSession(nextTasks);
+  renderInlineTasks();
+  renderCurrentTask();
+}
+function renderInlineTasks() {
+  const list = $("inlineTaskList"), items = readTasks().filter(task => !task.deleted);
+  list.innerHTML = "";
+  if (!items.length) { list.innerHTML = '<div class="inline-task-empty">Todavía no hay tareas para esta sesión.</div>'; resizeWindow(); return; }
+  items.forEach(task => {
+    const row = document.createElement("div"); row.className = `inline-task-row ${task.done ? "done" : ""} ${task.id === activeTaskId ? "active" : ""}`;
+    row.draggable = true;
+    row.dataset.taskId = task.id;
+    row.innerHTML = `<span class="inline-drag" title="Arrastrar">⋮⋮</span><button class="inline-check" type="button">${task.done ? "✓" : ""}</button><span class="inline-task-copy"><b></b><small>${formatTaskDuration(sessionTaskElapsed(task))}</small></span><button class="inline-active" type="button" title="Trabajar en esta tarea">${task.id === activeTaskId ? "▶" : "▷"}</button><button class="inline-priority priority-${task.priority || "medium"}" type="button">${priorityLabel(task.priority)}</button><button class="inline-delete" type="button">×</button>`;
+    row.querySelector(".inline-task-copy b").textContent = task.text;
+    row.querySelector(".inline-check").addEventListener("click", () => {
+      if (task.id === activeTaskId) checkpointActiveTaskTime();
+      const next = readTasks().map(item => item.id === task.id ? { ...item, done: !item.done, completedAt: !item.done ? new Date().toISOString() : null } : item);
+      persistInlineTasks(next);
+      if (task.id === activeTaskId && !task.done) chooseDefaultActiveTask();
+    });
+    row.querySelector(".inline-active").addEventListener("click", () => !task.done && setActiveTask(task.id));
+    row.querySelector(".inline-priority").addEventListener("click", () => { const order = ["low", "medium", "high"], next = order[(order.indexOf(task.priority || "medium") + 1) % order.length]; persistInlineTasks(readTasks().map(item => item.id === task.id ? { ...item, priority: next } : item)); });
+    row.querySelector(".inline-delete").addEventListener("click", () => {
+      if (task.id === activeTaskId) checkpointActiveTaskTime();
+      persistInlineTasks(readTasks().filter(item => item.id !== task.id));
+      if (task.id === activeTaskId) chooseDefaultActiveTask();
+    });
+    row.addEventListener("dragstart", event => { event.dataTransfer.setData("text/plain", task.id); row.classList.add("dragging"); });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    row.addEventListener("dragover", event => event.preventDefault());
+    row.addEventListener("drop", event => {
+      event.preventDefault();
+      const sourceId = event.dataTransfer.getData("text/plain");
+      const ordered = readTasks(), sourceIndex = ordered.findIndex(item => item.id === sourceId), targetIndex = ordered.findIndex(item => item.id === task.id);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+      checkpointActiveTaskTime();
+      const [moved] = ordered.splice(sourceIndex, 1); ordered.splice(targetIndex, 0, moved);
+      persistInlineTasks(ordered);
+      chooseDefaultActiveTask();
+    });
+    list.appendChild(row);
+  });
+  resizeWindow();
+}
+function toggleInlineTasks() {
+  $("inlineTasksPanel").classList.toggle("hidden");
+  if (!$("inlineTasksPanel").classList.contains("hidden")) renderInlineTasks();
+  resizeWindow();
 }
 
 function openHabits() {
   ipcRenderer.send("open-habits");
 }
 
-function openStats() {
-  ipcRenderer.send("open-stats");
-}
-
 $("calBtn").addEventListener("click", openCalendar);
-$("tasksSetupBtn").addEventListener("click", openTasks);
+$("projectsSetupBtn").addEventListener("click", openTasks);
 $("habitsBtn").addEventListener("click", openHabits);
-$("statsBtn").addEventListener("click", openStats);
 $("calTimerBtn").addEventListener("click", openCalendar);
-$("tasksTimerBtn").addEventListener("click", openTasks);
+$("tasksTimerBtn").addEventListener("click", toggleInlineTasks);
+$("projectsTimerBtn").addEventListener("click", openTasks);
+$("closeInlineTasks").addEventListener("click", toggleInlineTasks);
+$("openFullTasks").addEventListener("click", openTasks);
+$("inlineTaskForm").addEventListener("submit", event => {
+  event.preventDefault(); const text = $("inlineTaskInput").value.trim(); if (!text) return;
+  persistInlineTasks([...readTasks(), { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, text, done: false, notes: "", priority: "medium", deleted: false, createdAt: new Date().toISOString() }]);
+  $("inlineTaskInput").value = "";
+});
 
 $("pendingSessions").addEventListener("click", event => {
   const button = event.target.closest("button[data-id]");
@@ -1033,33 +1284,39 @@ $("closeBtn").addEventListener("click", () => {
 });
 
 ipcRenderer.on("sessions-updated", updateSessionSummary);
+$("reviewWorkArea").addEventListener("change", event => {
+  fillVideoSelect($("reviewProject"), event.target.value);
+});
 window.addEventListener("focus", () => {
   updateSessionSummary();
   renderProjectSelects();
+  if (!$("inlineTasksPanel").classList.contains("hidden")) renderInlineTasks();
+});
+window.addEventListener("storage", event => {
+  if (event.key === TASKS_KEY) {
+    if (!$("inlineTasksPanel").classList.contains("hidden")) renderInlineTasks();
+    renderCurrentTask();
+  }
+  if ([PROJECTS_KEY, WORK_CHANNELS_KEY].includes(event.key)) renderProjectSelects();
 });
 
 updateSkyGradient();
 setInterval(updateSkyGradient, 60_000);
 setInterval(() => {
-  updateSessionSummary();
-  autoStartPendingSessions();
+  const pending = getPendingSessions();
+  updateSessionSummary(pending);
+  autoStartPendingSessions(pending);
 }, 1000);
 
 buildQuarterButtons();
 renderProjectSelects();
-document.querySelector('.dur-btn[data-mins="50"]')?.classList.add("selected");
+document.querySelector('.dur-btn[data-mins="75"]')?.classList.add("selected");
 updateSessionSummary();
 initResizeObserver();
 
 async function initializeApp() {
-  try {
-    const enabled = await ipcRenderer.invoke("get-startup-setting");
-    [$("startupDailyCheck"), $("startupSetupCheck")].forEach(input => { input.checked = Boolean(enabled); });
-  } catch {
-    // The setting remains available if the operating system query fails later.
-  }
-  if (hasDailyPriorities()) showPanel("panelSetup");
-  else showDailyPrioritiesPanel();
+  reconcileProjectTaskHistory();
+  showPanel("panelSetup");
   ipcRenderer.send("data-changed");
 }
 

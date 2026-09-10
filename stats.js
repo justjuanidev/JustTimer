@@ -2,6 +2,7 @@ const { ipcRenderer } = require("electron");
 
 const SESSIONS_KEY = "justtimer.sessions.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
+const WORK_CHANNELS_KEY = "justtimer.workChannels.v1";
 let currentPeriod = "week";
 
 function $(id) { return document.getElementById(id); }
@@ -15,6 +16,13 @@ function readSessions() {
 
 function readProjects() {
   try { const value = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]"); return Array.isArray(value) ? value : []; } catch { return []; }
+}
+
+function readWorkChannels() {
+  let channels = [];
+  try { const value = JSON.parse(localStorage.getItem(WORK_CHANNELS_KEY) || "[]"); channels = Array.isArray(value) ? value : []; } catch {}
+  [{ id: "personal", name: "JustJuani" }, { id: "work", name: "Laburo" }, { id: "routine", name: "Personal", hiddenFromVideos: true }].forEach(item => { if (!channels.some(channel => channel.id === item.id)) channels.push(item); });
+  return channels;
 }
 
 function completedSessions() {
@@ -88,12 +96,14 @@ function bucketKey(date, period) {
 }
 
 function makeSeries(sessions, period) {
-  const items = bucketConfig(period).map(bucket => ({ ...bucket, sessions: 0, hours: 0, energy: [] }));
+  const items = bucketConfig(period).map(bucket => ({ ...bucket, sessions: 0, hours: 0, energy: [], durations: [0, 0, 0] }));
   const byKey = new Map(items.map(item => [item.key, item]));
   sessions.forEach(session => {
     const item = byKey.get(bucketKey(new Date(session.startAt), period));
     if (!item) return;
     item.sessions += 1; item.hours += durationHours(session);
+    const minutes = (Number(session.durationSecs) || 0) / 60;
+    item.durations[minutes <= 37 ? 0 : minutes <= 62 ? 1 : 2] += 1;
     if (Number(session.energy) >= 1 && Number(session.energy) <= 10) item.energy.push(Number(session.energy));
   });
   return items;
@@ -105,17 +115,19 @@ function svgShell(content, width = 720, height = 225) {
 
 function renderVolumeChart(series) {
   const width = 720, height = 225, left = 34, right = 12, top = 18, bottom = 37, chartH = height - top - bottom, chartW = width - left - right;
-  const max = Math.max(1, ...series.map(item => Math.max(item.sessions, item.hours)));
+  const max = Math.max(1, ...series.map(item => item.sessions));
   const step = chartW / series.length;
   let marks = "";
   for (let line = 0; line <= 4; line += 1) { const y = top + chartH * (line / 4); marks += `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="chart-gridline"/>`; }
   const bars = series.map((item, index) => {
-    const x = left + index * step + step * .16, barW = Math.max(2, step * .28);
-    const sessionH = item.sessions / max * chartH, hoursH = item.hours / max * chartH;
+    const x = left + index * step + step * .2, barW = Math.max(3, step * .6);
     const label = (series.length <= 12 || index % Math.ceil(series.length / 12) === 0) ? `<text x="${left + index * step + step / 2}" y="${height - 13}" class="chart-label">${item.label}</text>` : "";
-    return `<rect x="${x}" y="${top + chartH - sessionH}" width="${barW}" height="${sessionH}" rx="2" class="chart-bar-sessions"><title>${item.label}: ${item.sessions} sesiones</title></rect><rect x="${x + barW + 2}" y="${top + chartH - hoursH}" width="${barW}" height="${hoursH}" rx="2" class="chart-bar-hours"><title>${item.label}: ${item.hours.toFixed(1)} horas</title></rect>${label}`;
+    let y = top + chartH;
+    const stacks = item.durations.map((count, durationIndex) => { const h = count / max * chartH; y -= h; return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="2" class="chart-duration-${durationIndex}"><title>${item.label}: ${count} sesiones</title></rect>`; }).join("");
+    const total = item.sessions ? `<text x="${x + barW / 2}" y="${Math.max(12, y - 5)}" class="chart-count">${item.sessions}</text>` : "";
+    return `${stacks}${total}${label}`;
   }).join("");
-  $("volumeChart").innerHTML = `<div class="chart-legend"><span><i class="legend-sessions"></i>Sesiones</span><span><i class="legend-hours"></i>Horas</span></div>${svgShell(marks + bars, width, height)}`;
+  $("volumeChart").innerHTML = `<div class="chart-legend"><span><i class="legend-25"></i>25 min</span><span><i class="legend-50"></i>50 min</span><span><i class="legend-75"></i>75+ min</span></div>${svgShell(marks + bars, width, height)}`;
 }
 
 function renderHourChart(sessions) {
@@ -129,16 +141,13 @@ function renderHourChart(sessions) {
   $("hourChart").innerHTML = svgShell(`<line x1="${left}" y1="${top + chartH}" x2="${width - right}" y2="${top + chartH}" class="chart-gridline"/>${bars}`, width, height);
 }
 
-function renderEnergyChart(series) {
-  const values = series.map(item => average(item.energy));
-  const width = 720, height = 225, left = 34, right = 12, top = 18, bottom = 37, chartH = height - top - bottom, chartW = width - left - right;
-  const points = values.map((value, index) => value === null ? null : `${left + (series.length === 1 ? chartW / 2 : index * chartW / (series.length - 1))},${top + (10 - value) / 9 * chartH}`);
-  const valid = points.filter(Boolean);
-  let grid = "";
-  [1, 3, 5, 7, 10].forEach(value => { const y = top + (10 - value) / 9 * chartH; grid += `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="chart-gridline"/><text x="${left - 8}" y="${y + 4}" class="chart-y-label">${value}</text>`; });
-  const labels = series.map((item, index) => (series.length <= 12 || index % Math.ceil(series.length / 12) === 0) ? `<text x="${left + (series.length === 1 ? chartW / 2 : index * chartW / (series.length - 1))}" y="${height - 13}" class="chart-label">${item.label}</text>` : "").join("");
-  const line = valid.length ? `<polyline points="${valid.join(" ")}" class="energy-line"/>${points.map((point, index) => point ? `<circle cx="${point.split(",")[0]}" cy="${point.split(",")[1]}" r="3.5" class="energy-dot"><title>${series[index].label}: ${values[index].toFixed(1)}/10</title></circle>` : "").join("")}` : `<text x="${width / 2}" y="${height / 2}" class="chart-empty">No hay energía registrada en este período</text>`;
-  $("energyChart").innerHTML = svgShell(grid + line + labels, width, height);
+function renderEnergyChart(sessions) {
+  const counts = Array.from({ length: 10 }, () => 0);
+  sessions.forEach(session => { const energy = Math.round(Number(session.energy)); if (energy >= 1 && energy <= 10) counts[energy - 1] += 1; });
+  const width = 720, height = 225, left = 34, right = 12, top = 20, bottom = 35, chartH = height - top - bottom, step = (width - left - right) / 10, max = Math.max(1, ...counts);
+  let grid = ""; for (let line = 0; line <= 4; line += 1) { const y = top + chartH * line / 4; grid += `<line x1="${left}" y1="${y}" x2="${width-right}" y2="${y}" class="chart-gridline"/>`; }
+  const bars = counts.map((count, index) => { const h = count / max * chartH, x = left + index * step + step * .18; return `<rect x="${x}" y="${top + chartH - h}" width="${step * .64}" height="${h}" rx="4" class="energy-count-bar"><title>Energía ${index + 1}: ${count} sesiones</title></rect>${count ? `<text x="${x + step * .32}" y="${top + chartH - h - 5}" class="chart-count">${count}</text>` : ""}<text x="${x + step * .32}" y="${height - 12}" class="chart-label">${index + 1}</text>`; }).join("");
+  $("energyChart").innerHTML = svgShell(grid + bars, width, height);
 }
 
 function renderKpis(sessions) {
@@ -171,16 +180,20 @@ function renderTags() {
 }
 
 function renderProjectStats() {
-  const names = new Map(readProjects().map(project => [project.id, project.title]));
+  const projectMap = new Map(readProjects().map(project => [project.id, project]));
   const groups = new Map();
-  completedSessions().filter(session => session.projectId || session.projectName).forEach(session => {
-    const key = session.projectId || session.projectName;
-    const label = names.get(key) || session.projectName || "Proyecto eliminado";
+  completedSessions().forEach(session => {
+    const project = projectMap.get(session.projectId);
+    const area = session.workArea || project?.workChannelId || project?.mode || "personal";
+    const areaLabel = readWorkChannels().find(channel => channel.id === area)?.name || (area === "work" ? "Laburo" : "JustJuani");
+    const videoLabel = project?.title || session.projectName || "General del canal";
+    const key = session.projectId || `${area}:general`;
+    const label = `${areaLabel} · ${videoLabel}`;
     const item = groups.get(key) || { label, sessions: 0, hours: 0 };
     item.sessions += 1; item.hours += durationHours(session); groups.set(key, item);
   });
   const items = [...groups.values()].sort((a, b) => b.hours - a.hours), max = Math.max(1, ...items.map(item => item.hours));
-  $("projectStatsList").innerHTML = items.length ? items.map(item => `<div class="tag-row"><div class="tag-row-heading"><strong>${escapeHtml(item.label)}</strong><span>${item.sessions} sesiones · ${item.hours.toFixed(1)} h</span></div><div class="tag-track project-stat-track"><i style="width:${item.hours / max * 100}%"></i></div></div>`).join("") : `<div class="chart-empty">Aún no hay sesiones asociadas a proyectos.</div>`;
+  $("projectStatsList").innerHTML = items.length ? items.map(item => `<div class="tag-row"><div class="tag-row-heading"><strong>${escapeHtml(item.label)}</strong><span>${item.sessions} sesiones · ${item.hours.toFixed(1)} h</span></div><div class="tag-track project-stat-track"><i style="width:${item.hours / max * 100}%"></i></div></div>`).join("") : `<div class="chart-empty">Aún no hay sesiones registradas.</div>`;
 }
 
 function escapeHtml(value) { return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
@@ -188,7 +201,7 @@ function escapeHtml(value) { return String(value).replaceAll("&", "&amp;").repla
 function renderStats() {
   const sessions = sessionsForPeriod(currentPeriod), series = makeSeries(sessions, currentPeriod);
   $("rangeLabel").textContent = rangeLabel(currentPeriod);
-  renderKpis(sessions); renderVolumeChart(series); renderHourChart(sessions); renderEnergyChart(series); renderEnergyScales(); renderTags(); renderProjectStats();
+  renderKpis(sessions); renderVolumeChart(series); renderHourChart(sessions); renderEnergyChart(sessions); renderEnergyScales(); renderProjectStats();
 }
 
 function showToast(message) { const toast = $("statsToast"); toast.textContent = message; toast.classList.remove("hidden"); setTimeout(() => toast.classList.add("hidden"), 3200); }
@@ -202,14 +215,12 @@ function exportAnalytics() {
     exportedAt: new Date().toISOString(),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     summary: { completedSessions: all.length, totalFocusHours: Number(all.reduce((sum, session) => sum + durationHours(session), 0).toFixed(2)), averageEnergy: average(all.map(session => Number(session.energy)).filter(value => value >= 1 && value <= 10)) },
-    sessions: all.map(session => ({ id: session.id, startedAt: session.startAt, endedAt: session.endedAt || null, completedAt: session.completedAt || null, durationSeconds: Number(session.durationSecs) || 0, label: session.label || null, projectId: session.projectId || null, projectName: session.projectName || null, energy: Number(session.energy) || null, notes: session.notes || null, breakSeconds: Number(session.breakTotalSecs) || 0, cancelledEarly: Boolean(session.cancelledEarly), tasks: Array.isArray(session.tasks) ? session.tasks.map(task => ({ text: task.text || "", completed: Boolean(task.done), notes: task.notes || null })) : [] })),
+    sessions: all.map(session => ({ id: session.id, startedAt: session.startAt, endedAt: session.endedAt || null, completedAt: session.completedAt || null, durationSeconds: Number(session.durationSecs) || 0, label: session.label || null, workArea: session.workArea || null, workAreaName: session.workAreaName || null, projectId: session.projectId || null, projectName: session.projectName || null, energy: Number(session.energy) || null, notes: session.notes || null, breakSeconds: Number(session.breakTotalSecs) || 0, cancelledEarly: Boolean(session.cancelledEarly), tasks: Array.isArray(session.tasks) ? session.tasks.map(task => ({ text: task.text || "", completed: Boolean(task.done), notes: task.notes || null })) : [] })),
   };
   ipcRenderer.invoke("export-analytics", payload).then(result => { if (result?.saved) showToast("Analítica exportada como JSON."); }).catch(() => showToast("No se pudo exportar el archivo."));
 }
 
 document.querySelectorAll(".period-btn").forEach(button => button.addEventListener("click", () => { currentPeriod = button.dataset.period; document.querySelectorAll(".period-btn").forEach(item => item.classList.toggle("active", item === button)); renderStats(); }));
-$("statsTabBtn").addEventListener("click", () => { $("statsView").classList.remove("hidden"); $("tagsView").classList.add("hidden"); $("statsTabBtn").classList.add("active"); $("tagsTabBtn").classList.remove("active"); });
-$("tagsTabBtn").addEventListener("click", () => { $("tagsView").classList.remove("hidden"); $("statsView").classList.add("hidden"); $("tagsTabBtn").classList.add("active"); $("statsTabBtn").classList.remove("active"); });
 $("exportBtn").addEventListener("click", exportAnalytics);
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 ipcRenderer.on("sessions-updated", renderStats);

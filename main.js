@@ -122,14 +122,11 @@ function backupBeforeNewVersion() {
 
 configureUserDataPath();
 backupBeforeNewVersion();
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch("disable-gpu");
-app.commandLine.appendSwitch("disable-gpu-compositing");
-app.commandLine.appendSwitch("in-process-gpu");
-
 let mainWindow;
 const childWindows = new Map();
 let lastSnapshotStorage = "";
+let snapshotTimer = null;
+let snapshotSource = null;
 let googleCalendar;
 const notifiedHabitKeys = new Set();
 
@@ -197,6 +194,15 @@ async function captureSnapshotFromWindow(target = mainWindow) {
   }
 }
 
+function scheduleSnapshot(target = mainWindow) {
+  snapshotSource = target && !target.isDestroyed() ? target : mainWindow;
+  clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    captureSnapshotFromWindow(snapshotSource);
+  }, 900);
+}
+
 const sharedWindowOptions = {
   frame: false,
   transparent: true,
@@ -232,9 +238,18 @@ function openChildWindow(key, file, options) {
   const child = new BrowserWindow({
     ...sharedWindowOptions,
     ...options,
-    parent: mainWindow,
+    show: false,
+    parent: undefined,
+    alwaysOnTop: false,
+    transparent: false,
+    backgroundColor: "#ffffff",
   });
 
+  child.once("ready-to-show", () => {
+    child.center();
+    child.show();
+    child.focus();
+  });
   child.on("closed", () => childWindows.delete(key));
   child.on("close", () => captureSnapshotFromWindow(child));
   child.loadFile(path.join(__dirname, file));
@@ -295,31 +310,19 @@ ipcMain.on("close-current-window", event => {
 });
 
 ipcMain.on("open-calendar", () => {
-  openChildWindow("calendar", "calendar.html", { width: 920, height: 700, resizable: true });
+  openChildWindow("calendar", "calendar.html", { width: 1040, height: 740, minWidth: 780, minHeight: 580, resizable: true });
 });
 
 ipcMain.on("open-tasks", () => {
-  openChildWindow("tasks", "tasks.html", { width: 380, height: 520, resizable: true });
+  openChildWindow("tasks", "tasks.html", { width: 520, height: 620, minWidth: 420, minHeight: 480, resizable: true });
 });
 
 ipcMain.on("open-day-tasks", () => {
-  openChildWindow("day-tasks", "day.html", { width: 1020, height: 720, resizable: true });
-});
-
-ipcMain.handle("get-startup-setting", () => app.getLoginItemSettings().openAtLogin);
-
-ipcMain.handle("set-startup-setting", (_event, enabled) => {
-  if (process.platform !== "win32") return { enabled: false, supported: false };
-  app.setLoginItemSettings({
-    openAtLogin: Boolean(enabled),
-    path: app.getPath("exe"),
-    args: [],
-  });
-  return { enabled: app.getLoginItemSettings().openAtLogin, supported: true };
+  openChildWindow("day-tasks", "day.html", { width: 1180, height: 760, minWidth: 720, minHeight: 560, resizable: true });
 });
 
 ipcMain.on("data-changed", event => {
-  captureSnapshotFromWindow(BrowserWindow.fromWebContents(event.sender) || mainWindow);
+  scheduleSnapshot(BrowserWindow.fromWebContents(event.sender) || mainWindow);
 });
 
 ipcMain.handle("select-project-image", async event => {
@@ -336,7 +339,7 @@ ipcMain.handle("select-project-image", async event => {
 });
 
 ipcMain.on("open-habits", () => {
-  openChildWindow("habits", "habits.html", { width: 760, height: 560, resizable: true });
+  openChildWindow("habits", "habits.html", { width: 860, height: 650, minWidth: 680, minHeight: 520, resizable: true });
 });
 
 ipcMain.on("open-stats", () => {
@@ -344,7 +347,7 @@ ipcMain.on("open-stats", () => {
 });
 
 ipcMain.on("session-created", () => {
-  captureSnapshotFromWindow(mainWindow);
+  scheduleSnapshot(mainWindow);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("sessions-updated");
   }

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Analítica</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="tool-light.css" />
 </head>
 <body class="tool-window">
   <div class="drag-bar"><span class="close-btn" id="closeBtn" title="Cerrar">&times;</span></div>
@@ -16,8 +17,6 @@
       </div>
       <div class="stats-header-actions">
         <button class="tool-btn" id="exportBtn">Exportar JSON</button>
-        <button class="tool-btn view-btn active" id="statsTabBtn">Estadísticas</button>
-        <button class="tool-btn view-btn" id="tagsTabBtn">Etiquetas</button>
       </div>
     </header>
 
@@ -33,8 +32,8 @@
       <section class="stats-kpis" id="kpiGrid"></section>
       <section class="stats-chart-grid">
         <article class="stats-card stats-card-wide">
-          <div class="stats-card-title">Sesiones y tiempo de enfoque</div>
-          <div class="stats-card-subtitle">Cantidad de sesiones y horas por período</div>
+          <div class="stats-card-title">Sesiones por período</div>
+          <div class="stats-card-subtitle">Distribución de sesiones de 25, 50 y 75+ minutos</div>
           <div class="stats-chart" id="volumeChart"></div>
         </article>
         <article class="stats-card">
@@ -43,8 +42,8 @@
           <div class="stats-chart" id="hourChart"></div>
         </article>
         <article class="stats-card stats-card-wide">
-          <div class="stats-card-title">Energía promedio</div>
-          <div class="stats-card-subtitle">Sólo incluye sesiones con energía registrada</div>
+          <div class="stats-card-title">Distribución de energía</div>
+          <div class="stats-card-subtitle">Cuántas sesiones registraste con cada nivel</div>
           <div class="stats-chart" id="energyChart"></div>
         </article>
       </section>
@@ -53,20 +52,12 @@
         <div class="energy-scale-grid" id="energyScaleGrid"></div>
       </section>
       <section class="stats-energy-summary">
-        <div class="stats-card-title">Trabajo por proyecto</div>
-        <div class="stats-card-subtitle">Sesiones terminadas y horas de enfoque acumuladas.</div>
+        <div class="stats-card-title">Trabajo por canal y video</div>
+        <div class="stats-card-subtitle">Incluye las horas generales de JustJuani y Laburo, además de cada video.</div>
         <div class="tag-list" id="projectStatsList"></div>
       </section>
     </section>
 
-    <section id="tagsView" class="tags-view hidden">
-      <div class="tags-intro">Las etiquetas se muestran por separado de las estadísticas para que puedas comparar en qué tipo de sesiones invertís tu tiempo.</div>
-      <section class="stats-card">
-        <div class="stats-card-title">Distribución por etiqueta</div>
-        <div class="stats-card-subtitle">Sesiones terminadas y horas acumuladas</div>
-        <div class="tag-list" id="tagList"></div>
-      </section>
-    </section>
     <div class="stats-toast hidden" id="statsToast"></div>
   </main>
   <script src="stats.js"></script>

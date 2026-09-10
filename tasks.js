@@ -303,7 +303,7 @@ function renderTaskList({ listEl, scope, emptyText }) {
       <input class="task-check" type="checkbox" ${task.done ? "checked" : ""} />
       <button class="task-text" type="button"></button>
       <div class="task-priority-wrap">
-        <button class="task-priority priority-${task.priority || "medium"}" type="button" title="Cambiar prioridad">⚑</button>
+        <button class="task-priority priority-${task.priority || "medium"}" type="button" title="Cambiar prioridad">${task.priority === "high" ? "P1" : task.priority === "low" ? "P3" : "P2"}</button>
         <div class="task-priority-menu hidden">
           <button type="button" data-priority="high">P1</button>
           <button type="button" data-priority="medium">P2</button>
