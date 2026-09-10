@@ -114,6 +114,15 @@ function focusChannelForPlan(plan) {
   return plan?.focusChannelId || null;
 }
 
+function channelDailyTarget(plan, channelId) {
+  const explicit=Math.max(0,Number(plan?.channelDailyTargets?.[channelId])||0);
+  if (explicit) return explicit;
+  const channelWeekly=Math.max(0,Number(plan?.channelTargets?.[channelId])||0), weekly=Math.max(0,Number(plan?.weeklySessions)||0), daily=Math.max(0,Number(plan?.dailySessions)||0);
+  return channelWeekly&&weekly&&daily ? channelWeekly/weekly*daily : 0;
+}
+
+function formatSessionTarget(value) { const number=Math.max(0,Number(value)||0); return Number.isInteger(number)?String(number):number.toFixed(1).replace(".",","); }
+
 function goalAvatar(channel) {
   return channel.avatarUrl ? `<img src="${escapeAttr(channel.avatarUrl)}" alt="" />` : `<span>${channel.id === "routine" ? "J" : escapeHtml((channel.name || "J").slice(0, 1).toUpperCase())}</span>`;
 }
@@ -127,7 +136,7 @@ function statsInRange(channelId, start, end, allSessions = readSessions(), proje
 }
 
 function renderChannelGoals() {
-  const box = $("channelGoals"), plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan), goals = readChannelGoals();
+  const box = $("channelGoals"), plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan);
   const today=new Date(), todayStart=new Date(today); todayStart.setHours(0,0,0,0); const todayEnd=addDays(todayStart,1), selectedIsCurrent=weekKey(weekStart)===weekKey(today), projectMap=new Map(readProjects().map(project=>[project.id,project]));
   const target = Math.max(0, Number(plan?.weeklySessions) || 0), percent = planPercent(result.totalSessions, target);
   const channels = readWorkChannels().filter(channel => channel.id !== "routine");
@@ -143,12 +152,12 @@ function renderChannelGoals() {
   const cards = channels.map(channel => {
     const actual = result.byChannel.get(channel.id) || { sessions: 0, minutes: 0 };
     const sessionTarget = Math.max(0, Number(plan?.channelTargets?.[channel.id]) || 0);
-    const legacy = goals[channel.id] || { dailyMinutes: 75, weeklyMinutes: 375 };
+    const dailySessionTarget=channelDailyTarget(plan,channel.id);
     const daily=selectedIsCurrent?statsInRange(channel.id,todayStart,todayEnd,readSessions(),projectMap):null;
     const channelPercent = planPercent(actual.sessions, sessionTarget);
     const focused = focusChannelForPlan(plan) === channel.id;
-    if (!sessionTarget && !actual.sessions && !focused) return "";
-    return `<button class="channel-goal-card ${focused ? "weekly-focus-channel" : ""}" data-channel-goal="${escapeAttr(channel.id)}" title="Ver progreso semanal de ${escapeAttr(channel.name)}"><span class="goal-avatar">${goalAvatar(channel)}</span><span class="goal-copy"><strong>${focused ? "🔥 " : ""}${escapeHtml(channel.name)}</strong>${daily?`<small><b>Hoy</b> ${daily.minutes}/${legacy.dailyMinutes} min · ${daily.sessions} sesiones</small>`:""}<small><b>Semana</b> ${actual.sessions}${sessionTarget ? `/${sessionTarget}` : ""} sesiones · ${formatMinutes(actual.minutes)}</small><small><b>Minutos</b> ${Math.round(actual.minutes)}/${legacy.weeklyMinutes}</small>${sessionTarget ? `<i class="single-progress"><b style="width:${Math.min(100, channelPercent)}%"></b></i>` : ""}</span></button>`;
+    if (!sessionTarget && !dailySessionTarget && !actual.sessions && !focused) return "";
+    return `<button class="channel-goal-card ${focused ? "weekly-focus-channel" : ""}" data-channel-goal="${escapeAttr(channel.id)}" title="Ver progreso semanal de ${escapeAttr(channel.name)}"><span class="goal-avatar">${goalAvatar(channel)}</span><span class="goal-copy"><strong>${focused ? "🔥 " : ""}${escapeHtml(channel.name)}</strong>${daily?`<small><b>Hoy</b> ${daily.sessions}${dailySessionTarget?`/${formatSessionTarget(dailySessionTarget)}`:""} sesiones · ${formatMinutes(daily.minutes)}</small>`:""}<small><b>Semana</b> ${actual.sessions}${sessionTarget ? `/${sessionTarget}` : ""} sesiones · ${formatMinutes(actual.minutes)}</small><small class="channel-session-goals"><b>Objetivos</b> ${dailySessionTarget?`${formatSessionTarget(dailySessionTarget)} diarias · `:""}${sessionTarget?`${sessionTarget} semanales`:"sin asignar"}</small>${sessionTarget ? `<i class="single-progress"><b style="width:${Math.min(100, channelPercent)}%"></b></i>` : ""}</span></button>`;
   }).join("");
   box.innerHTML = general + cards;
   box.querySelector("[data-edit-week]")?.addEventListener("click", () => openWeeklyPlan(weekStart));
@@ -925,16 +934,22 @@ function fillWeeklyPlanForm(plan) {
   $("weeklyFocusChannel").value = plan?.focusTarget || (plan?.focusChannelId ? `channel:${plan.focusChannelId}` : "");
   const planned = new Set(Array.isArray(plan?.plannedDays) ? plan.plannedDays : [0,1,2,3,4,5]);
   $("plannedDays").querySelectorAll("input").forEach(input => { input.checked = planned.has(Number(input.value)); });
-  $("weeklyChannelTargets").querySelectorAll("input").forEach(input => { input.value = Number(plan?.channelTargets?.[input.dataset.channelTarget]) || ""; });
+  $("weeklyChannelTargets").querySelectorAll("[data-channel-target]").forEach(input => { input.value = Number(plan?.channelTargets?.[input.dataset.channelTarget]) || ""; });
+  $("weeklyChannelTargets").querySelectorAll("[data-channel-daily-target]").forEach(input => { const explicit=Number(plan?.channelDailyTargets?.[input.dataset.channelDailyTarget])||0, derived=channelDailyTarget(plan,input.dataset.channelDailyTarget); input.value=explicit||derived?formatSessionTarget(explicit||derived).replace(",","."):""; input.dataset.derived=explicit?"false":"true"; });
   updateFlexibleSessions();
 }
 
 function updateFlexibleSessions() {
   const total = Math.max(0, Number($("weeklySessionTarget").value) || 0);
-  const assigned = [...$("weeklyChannelTargets").querySelectorAll("input")].reduce((sum, input) => sum + Math.max(0, Number(input.value) || 0), 0);
+  const assigned = [...$("weeklyChannelTargets").querySelectorAll("[data-channel-target]")].reduce((sum, input) => sum + Math.max(0, Number(input.value) || 0), 0);
   const flexible = total - assigned;
   $("weeklyFlexibleSessions").textContent = flexible >= 0 ? `${flexible} sesiones flexibles` : `${Math.abs(flexible)} sesiones por encima del objetivo general (permitido)`;
   $("weeklyFlexibleSessions").classList.toggle("over-assigned", flexible < 0);
+}
+
+function updateDerivedChannelDailyTargets() {
+  const weekly=Math.max(0,Number($("weeklySessionTarget").value)||0),daily=Math.max(0,Number($("dailySessionTarget").value)||0);
+  $("weeklyChannelTargets").querySelectorAll("[data-channel-target]").forEach(input=>{const dailyInput=input.closest("label").querySelector("[data-channel-daily-target]");if(!dailyInput||dailyInput.dataset.derived==="false")return;const value=weekly&&daily?Math.max(0,Number(input.value)||0)/weekly*daily:0;dailyInput.value=value?formatSessionTarget(value).replace(",","."):"";});
 }
 
 function openWeeklyPlan(date = weekStart) {
@@ -943,7 +958,7 @@ function openWeeklyPlan(date = weekStart) {
   const projects=readProjects().filter(project=>!project.archived);
   $("weeklyFocusChannel").innerHTML = `<option value="">Sin foco único</option><optgroup label="Canales">${channels.map(channel => `<option value="channel:${escapeAttr(channel.id)}">${escapeHtml(channel.name)}</option>`).join("")}</optgroup><optgroup label="Proyectos / videos">${projects.map(project=>`<option value="project:${escapeAttr(project.id)}">${escapeHtml(project.title)}</option>`).join("")}</optgroup>`;
   $("plannedDays").innerHTML = DAYS.map((day,index) => `<label><input type="checkbox" value="${index}"><span>${day}</span></label>`).join("");
-  $("weeklyChannelTargets").innerHTML = channels.map(channel => `<label><span class="goal-avatar">${goalAvatar(channel)}</span><strong>${escapeHtml(channel.name)}</strong><input class="tool-input" type="number" min="0" max="500" step="1" data-channel-target="${escapeAttr(channel.id)}" placeholder="0"></label>`).join("");
+  $("weeklyChannelTargets").innerHTML = `<div class="channel-target-head"><span></span><span>Canal</span><span>Por día</span><span>Semana</span></div>`+channels.map(channel => `<label><span class="goal-avatar">${goalAvatar(channel)}</span><strong>${escapeHtml(channel.name)}</strong><input class="tool-input" type="number" min="0" max="100" step="0.1" data-channel-daily-target="${escapeAttr(channel.id)}" placeholder="—" title="Objetivo diario de sesiones"><input class="tool-input" type="number" min="0" max="500" step="1" data-channel-target="${escapeAttr(channel.id)}" placeholder="0" title="Objetivo semanal de sesiones"></label>`).join("");
   fillWeeklyPlanForm(plan);
   $("usePreviousPlan").disabled = !previousWeeklyPlan(start);
   $("weeklyPlanDialog").dataset.weekStart = weekKey(start);
@@ -954,14 +969,15 @@ function saveWeeklyPlan(event) {
   event.preventDefault();
   const key = $("weeklyPlanDialog").dataset.weekStart, plans = readWeeklyPlans(), existing = plans[key] || null;
   const plannedDays = [...$("plannedDays").querySelectorAll("input:checked")].map(input => Number(input.value));
-  const channelTargets = Object.fromEntries([...$("weeklyChannelTargets").querySelectorAll("input")].map(input => [input.dataset.channelTarget, Math.max(0, Math.round(Number(input.value) || 0))]).filter(([,value]) => value > 0));
+  const channelTargets = Object.fromEntries([...$("weeklyChannelTargets").querySelectorAll("[data-channel-target]")].map(input => [input.dataset.channelTarget, Math.max(0, Math.round(Number(input.value) || 0))]).filter(([,value]) => value > 0));
+  const channelDailyTargets = Object.fromEntries([...$("weeklyChannelTargets").querySelectorAll("[data-channel-daily-target]")].map(input => [input.dataset.channelDailyTarget, Math.max(0, Math.round((Number(input.value)||0)*10)/10)]).filter(([,value]) => value > 0));
   const focusTarget=$("weeklyFocusChannel").value || null, focusChannelId=focusTarget?.startsWith("channel:") ? focusTarget.slice(8) : null;
-  const next = { weekStart:key, weekEnd:dateKey(addDays(new Date(`${key}T00:00:00`),6)), focusText:$("weeklyFocusText").value.trim(), weeklySessions:Math.max(0,Math.round(Number($("weeklySessionTarget").value)||0)), dailySessions:Math.max(0,Math.round(Number($("dailySessionTarget").value)||0)), plannedDays, focusTarget, focusChannelId, channelTargets, createdAt:existing?.createdAt || new Date().toISOString(), updatedAt:new Date().toISOString(), revisions:Array.isArray(existing?.revisions) ? existing.revisions : [] };
+  const next = { weekStart:key, weekEnd:dateKey(addDays(new Date(`${key}T00:00:00`),6)), focusText:$("weeklyFocusText").value.trim(), weeklySessions:Math.max(0,Math.round(Number($("weeklySessionTarget").value)||0)), dailySessions:Math.max(0,Math.round(Number($("dailySessionTarget").value)||0)), plannedDays, focusTarget, focusChannelId, channelTargets, channelDailyTargets, createdAt:existing?.createdAt || new Date().toISOString(), updatedAt:new Date().toISOString(), revisions:Array.isArray(existing?.revisions) ? existing.revisions : [] };
   if (!plannedDays.length && next.dailySessions) { alert("Elegí al menos un día previsto o dejá el ritmo diario en cero."); return; }
   if (existing) {
-    const changed = JSON.stringify([existing.weeklySessions,existing.dailySessions,existing.plannedDays,existing.channelTargets]) !== JSON.stringify([next.weeklySessions,next.dailySessions,next.plannedDays,next.channelTargets]);
+    const changed = JSON.stringify([existing.weeklySessions,existing.dailySessions,existing.plannedDays,existing.channelTargets,existing.channelDailyTargets]) !== JSON.stringify([next.weeklySessions,next.dailySessions,next.plannedDays,next.channelTargets,next.channelDailyTargets]);
     if (changed && new Date() >= new Date(`${key}T00:00:00`) && !window.confirm("Esta semana ya empezó. ¿Querés actualizar el plan? Se conservará una copia de la configuración anterior.")) return;
-    if (changed) next.revisions = [...next.revisions, { changedAt:new Date().toISOString(), weeklySessions:existing.weeklySessions, dailySessions:existing.dailySessions, plannedDays:existing.plannedDays, focusText:existing.focusText, focusTarget:existing.focusTarget, focusChannelId:existing.focusChannelId, channelTargets:existing.channelTargets }].slice(-20);
+    if (changed) next.revisions = [...next.revisions, { changedAt:new Date().toISOString(), weeklySessions:existing.weeklySessions, dailySessions:existing.dailySessions, plannedDays:existing.plannedDays, focusText:existing.focusText, focusTarget:existing.focusTarget, focusChannelId:existing.focusChannelId, channelTargets:existing.channelTargets, channelDailyTargets:existing.channelDailyTargets }].slice(-20);
   }
   plans[key] = next; localStorage.setItem(WEEKLY_PLANS_KEY, JSON.stringify(plans)); ipcRenderer.send("data-changed");
   $("weeklyPlanDialog").close(); renderCalendar(); showMsg("Plan semanal guardado");
@@ -1089,8 +1105,9 @@ $("goalForm").addEventListener("submit", event => {
 $("closeWeeklyPlan").addEventListener("click", () => $("weeklyPlanDialog").close());
 $("weeklyPlanForm").addEventListener("submit", saveWeeklyPlan);
 $("usePreviousPlan").addEventListener("click", () => fillWeeklyPlanForm(previousWeeklyPlan(new Date(`${$("weeklyPlanDialog").dataset.weekStart}T00:00:00`))));
-$("weeklySessionTarget").addEventListener("input", updateFlexibleSessions);
-$("weeklyChannelTargets").addEventListener("input", updateFlexibleSessions);
+$("weeklySessionTarget").addEventListener("input", () => { updateFlexibleSessions(); updateDerivedChannelDailyTargets(); });
+$("dailySessionTarget").addEventListener("input", updateDerivedChannelDailyTargets);
+$("weeklyChannelTargets").addEventListener("input", event => { if (event.target.matches("[data-channel-daily-target]")) event.target.dataset.derived="false"; updateFlexibleSessions(); updateDerivedChannelDailyTargets(); });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 window.addEventListener("focus", renderCalendar);
 window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) renderCalendar(); });

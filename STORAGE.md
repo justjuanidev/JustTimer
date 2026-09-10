@@ -51,8 +51,10 @@ próxima sesión o permanecer en `justtimer.tasks.v1`.
   de Videos.
 - `justtimer.weeklyPlans.v1`: plan histórico indexado por el lunes de cada semana.
   Guarda solamente la configuración elegida (objetivo global de sesiones, ritmo
-  diario orientativo, días previstos, enfoque, foco principal y distribución por
-  canal). Las sesiones, minutos, energía y resultados siguen calculándose desde
+  diario orientativo, días previstos, enfoque, foco principal y objetivos diarios
+  y semanales por canal). Si un plan anterior no tiene objetivo diario por canal,
+  se deriva proporcionalmente del objetivo diario y semanal general. Las sesiones,
+  minutos, energía y resultados siguen calculándose desde
   `justtimer.sessions.v1`. Las ediciones de una semana iniciada conservan hasta 20
   configuraciones anteriores dentro de `revisions`.
 
