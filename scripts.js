@@ -342,12 +342,35 @@ function renderHomePriorities() {
     const done = Boolean(task?.done || item.completedAt);
     const row = document.createElement("div");
     row.className = `home-item ${done ? "done" : ""} ${(item.kind === "additional" || index > 2) ? "additional" : ""}`;
-    row.innerHTML = `<button type="button" aria-label="${done ? "Reabrir" : "Completar"}">${done ? "✓" : ""}</button><span></span>`;
+    row.innerHTML = `<button type="button" aria-label="${done ? "Reabrir" : "Completar"}">${done ? "✓" : ""}</button><span></span><button class="home-item-delete" type="button" title="Eliminar tarea">×</button>`;
     row.querySelector("span").textContent = task?.text || item.text || "Tarea eliminada";
     row.querySelector("button").disabled = !task;
     row.querySelector("button").addEventListener("click", () => togglePriorityTask(item, task, !done));
+    row.querySelector(".home-item-delete").disabled = false;
+    row.querySelector(".home-item-delete").addEventListener("click", () => deletePriorityTask(item, task));
     list.appendChild(row);
   });
+}
+
+function deletePriorityTask(item, task) {
+  const label = task?.text || item.text || item.snapshotText || "esta prioridad";
+  const message = task
+    ? `¿Eliminar “${label}”? Se quitará también de las sesiones donde esté asignada.`
+    : `Esta prioridad quedó sin una tarea accesible. ¿Quitar “${label}” del día?`;
+  if (!window.confirm(message)) return;
+  const taskId = task?.id || item.taskId || item.sourceDayTaskId;
+  if (taskId) {
+    const deletedAt = new Date().toISOString();
+    localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(readProjectTasks().map(entry => entry.id === taskId ? { ...entry, deleted:true, deletedAt, updatedAt:deletedAt } : entry)));
+    const withoutTask = list => (list || []).filter(entry => entry.id !== taskId && linkedProjectTaskId(entry) !== taskId);
+    writeTasks(withoutTask(readTasks()));
+    writeSessions(readSessions().map(session => ({ ...session, tasks:withoutTask(session.tasks) })));
+  }
+  const plan = readDailyPriorities();
+  plan[todayKey()] = (plan[todayKey()] || []).filter(entry => entry.id !== item.id);
+  localStorage.setItem(DAILY_PRIORITIES_KEY, JSON.stringify(plan));
+  ipcRenderer.send("data-changed");
+  renderHome();
 }
 
 function togglePriorityTask(item, task, done) {

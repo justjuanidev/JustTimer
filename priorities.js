@@ -34,9 +34,38 @@ function renderPlan() {
 function slotRow(item, allTasks) {
   const task = allTasks.find(entry => entry.id === item.taskId && !entry.deleted), row = document.createElement("button");
   row.type = "button"; row.className = `priority-slot ${selectedSlot === item.slot ? "selected" : ""} ${task?.done ? "done" : ""}`;
-  row.innerHTML = `<span class="slot-number">${item.kind === "main" ? item.slot : "+"}</span><span><strong>${esc(task?.text || item.text || "Elegir tarea")}</strong><small>${task ? `${esc(channelName(task))} · ${esc(projectFor(task)?.title || "Sin proyecto")}` : "Buscá y seleccioná una tarea existente"}</small></span><i title="Quitar">×</i>`;
-  row.addEventListener("click", event => { if (event.target.tagName === "I") { plan = plan.map(entry => entry.id === item.id ? { ...entry, taskId:null, text:"" } : entry).filter(entry => !(entry.id === item.id && entry.kind === "additional")); } else selectedSlot = item.slot; renderPlan(); renderResults(); });
+  row.innerHTML = `<span class="slot-number">${item.kind === "main" ? item.slot : "+"}</span><span><strong>${esc(task?.text || item.text || item.snapshotText || "Elegir tarea")}</strong><small>${task ? `${esc(channelName(task))} · ${esc(projectFor(task)?.title || "Sin proyecto")}` : item.taskId ? "Tarea huérfana · podés eliminarla" : "Buscá y seleccioná una tarea existente"}</small></span><span class="slot-actions"><i data-action="clear" title="Quitar de este día">↶</i><i data-action="delete" title="Eliminar tarea">×</i></span>`;
+  row.addEventListener("click", event => {
+    const action = event.target.dataset.action;
+    if (action === "clear") clearPriority(item);
+    else if (action === "delete") deleteTaskEverywhere(item, task);
+    else selectedSlot = item.slot;
+    renderPlan(); renderResults();
+  });
   return row;
+}
+
+function clearPriority(item) {
+  plan = plan.map(entry => entry.id === item.id ? { ...entry, taskId:null, sourceDayTaskId:null, text:"" } : entry).filter(entry => !(entry.id === item.id && entry.kind === "additional"));
+}
+
+function deleteTaskEverywhere(item, task) {
+  const label = task?.text || item.text || item.snapshotText || "esta prioridad";
+  if (!window.confirm(task ? `¿Eliminar “${label}”? También se quitará de todas las sesiones asignadas.` : `Esta tarea ya no es accesible. ¿Limpiar “${label}” de prioridades?`)) return;
+  const taskId = task?.id || item.taskId || item.sourceDayTaskId;
+  if (taskId) {
+    const deletedAt = new Date().toISOString();
+    write(TASKS_KEY, tasks().map(entry => entry.id === taskId ? { ...entry, deleted:true, deletedAt, updatedAt:deletedAt } : entry));
+    const activeTasks = read("justtimer.tasks.v1", []).filter(entry => entry.id !== taskId && (entry.projectTaskId || entry.movedFromDayTaskId) !== taskId);
+    localStorage.setItem("justtimer.tasks.v1", JSON.stringify(activeTasks));
+    const sessions = read("justtimer.sessions.v1", []).map(session => ({ ...session, tasks:(session.tasks || []).filter(entry => entry.id !== taskId && (entry.projectTaskId || entry.movedFromDayTaskId) !== taskId) }));
+    localStorage.setItem("justtimer.sessions.v1", JSON.stringify(sessions));
+  }
+  const priorityMap = read(PRIORITIES_KEY, {});
+  priorityMap[targetDate] = (priorityMap[targetDate] || []).filter(entry => entry.id !== item.id);
+  write(PRIORITIES_KEY, priorityMap);
+  clearPriority(item);
+  ipcRenderer.send("session-created"); ipcRenderer.send("data-changed");
 }
 
 function taskScore(task) {
