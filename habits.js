@@ -8,9 +8,15 @@ const PHASES = {
   afternoon: { label: "Tarde", greeting: "Buenas tardes", range: "12:00 - 19:00", start: 12, end: 19 },
   night: { label: "Noche", greeting: "Buenas noches", range: "19:00 - 04:00", start: 19, end: 28 },
 };
+const REMINDER_PRESETS = {
+  morning: { label:"Mañana", times:["07:30", "09:00", "11:15"], standard:["08:00", "11:15"] },
+  afternoon: { label:"Tarde", times:["12:30", "14:30", "16:30", "18:15"], standard:["13:30", "18:15"] },
+  night: { label:"Noche", times:["19:30", "21:00", "22:30", "23:15"], standard:["20:00", "22:30"] },
+};
 
 let selectedHabitId = null;
 let pendingLog = null;
+let editingHabitId = null;
 
 function $(id) {
   return document.getElementById(id);
@@ -151,6 +157,15 @@ function scheduleNotifications(habits, logs, now = new Date()) {
         reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" });
       }
     }
+    if (habit.remindOnPhaseStart) {
+      const phases = habit.kind === "phase" ? [habit.phase] : Object.keys(PHASES);
+      phases.forEach(phaseId => {
+        const startHour = phaseId === "morning" ? 7 : PHASES[phaseId]?.start;
+        if (startHour == null) return;
+        const at = new Date(now); at.setHours(startHour, 0, 0, 0);
+        reminders.push({ habitId:habit.id, name:habit.name, at:at.toISOString(), body:`${habit.name}: comenzó ${PHASES[phaseId].label.toLowerCase()}`, kind:`phase-start-${phaseId}` });
+      });
+    }
   });
   ipcRenderer.send("schedule-habit-notifications", reminders);
 }
@@ -272,8 +287,9 @@ function renderHabitDetail(habitId) {
     <div class="side-section">Historial reciente</div>
     <div class="habit-history">${historyMarkup(habit, logs)}</div>`;
   detail.innerHTML = `${developmentStats}
-    <button class="tool-btn danger side-delete-btn" id="archiveHabitBtn">Archivar habito</button>
+    <div class="habit-detail-actions"><button class="tool-btn" id="editHabitBtn">Editar hábito</button><button class="tool-btn danger side-delete-btn" id="archiveHabitBtn">Archivar hábito</button></div>
   `;
+  $("editHabitBtn").addEventListener("click", () => openHabitForm(habit));
   $("archiveHabitBtn").addEventListener("click", () => archiveHabit(habit.id));
 }
 
@@ -362,26 +378,58 @@ function archiveHabit(id) {
   render();
 }
 
-function buildDayButtons() {
+function buildDayButtons(selectedDays = [0, 1, 2, 3, 4, 5, 6]) {
   const wrap = $("habitDays");
   wrap.innerHTML = "";
   [1, 2, 3, 4, 5, 6, 0].forEach(day => {
     const label = document.createElement("label");
     label.className = "habit-day";
-    label.innerHTML = `<input type="checkbox" value="${day}" checked /><span>${DAY_NAMES[day]}</span>`;
+    label.innerHTML = `<input type="checkbox" value="${day}" ${selectedDays.includes(day) ? "checked" : ""} /><span>${DAY_NAMES[day]}</span>`;
     wrap.appendChild(label);
   });
 }
 
-function openHabitForm() {
-  $("habitNameInput").value = "";
-  $("habitKindSelect").value = "phase";
-  $("habitTypeSelect").value = "routine";
-  $("habitPhaseSelect").value = "morning";
-  $("habitTargetInput").value = "1";
-  $("habitReminderTimes").value = "";
-  $("habitPhaseEndReminder").checked = true;
-  buildDayButtons();
+function selectedReminderTimes() {
+  return [...new Set($("habitReminderTimes").value.split(",").map(value => value.trim()).filter(value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value)))].sort();
+}
+
+function setReminderTimes(times) {
+  $("habitReminderTimes").value = [...new Set(times)].sort().join(", ");
+  renderReminderPresets();
+}
+
+function renderReminderPresets() {
+  const wrap = $("habitReminderPresets"), selected = new Set(selectedReminderTimes()), kind = $("habitKindSelect").value;
+  const phaseIds = kind === "phase" ? [$("habitPhaseSelect").value] : ["morning", "afternoon", "night"];
+  wrap.innerHTML = `<div class="reminder-preset-head"><span>Horarios sugeridos mientras estás despierto</span><button type="button" data-standard>Usar estándar</button></div>` + phaseIds.map(phaseId => {
+    const preset = REMINDER_PRESETS[phaseId];
+    return `<div class="reminder-preset-group"><small>${preset.label}</small>${preset.times.map(time => `<button type="button" data-reminder-time="${time}" class="${selected.has(time) ? "selected" : ""}">${time}</button>`).join("")}</div>`;
+  }).join("");
+  wrap.querySelector("[data-standard]").addEventListener("click", () => {
+    const standard = kind === "phase" ? REMINDER_PRESETS[$("habitPhaseSelect").value].standard : ["08:00", "13:30", "20:00"];
+    setReminderTimes(standard);
+  });
+  wrap.querySelectorAll("[data-reminder-time]").forEach(button => button.addEventListener("click", () => {
+    const next = new Set(selectedReminderTimes()); next.has(button.dataset.reminderTime) ? next.delete(button.dataset.reminderTime) : next.add(button.dataset.reminderTime); setReminderTimes([...next]);
+  }));
+}
+
+function openHabitForm(habit = null) {
+  editingHabitId = habit?.id || null;
+  $("habitFormTitle").textContent = habit ? "Editar hábito" : "Nuevo hábito";
+  $("habitNameInput").value = habit?.name || "";
+  $("habitKindSelect").value = habit?.kind || "phase";
+  $("habitTypeSelect").value = habit?.habitType || "routine";
+  $("habitPhaseSelect").value = habit?.phase || "morning";
+  $("habitTargetInput").value = String(habit?.targetCount || 1);
+  $("habitReminderTimes").value = (habit?.reminderTimes || []).join(", ");
+  $("habitAppStartReminder").checked = Boolean(habit?.remindOnAppStart);
+  $("habitPhaseStartReminder").checked = Boolean(habit?.remindOnPhaseStart);
+  $("habitPhaseEndReminder").checked = habit ? Boolean(habit.remindBeforePhaseEnd) : true;
+  $("habitPhaseSelect").classList.toggle("hidden", $("habitKindSelect").value !== "phase");
+  $("habitPhaseEndReminder").parentElement.classList.toggle("hidden", $("habitKindSelect").value !== "phase");
+  buildDayButtons(habit?.days || [0, 1, 2, 3, 4, 5, 6]);
+  renderReminderPresets();
   $("habitFormDialog").showModal();
 }
 
@@ -393,7 +441,7 @@ function saveHabit(event) {
   const days = [...$("habitDays").querySelectorAll("input:checked")].map(input => Number(input.value));
   const habits = readHabits();
   const reminderTimes = $("habitReminderTimes").value.split(",").map(value => value.trim()).filter(value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
-  habits.push({
+  const record = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name,
     habitType: $("habitTypeSelect").value,
@@ -401,11 +449,18 @@ function saveHabit(event) {
     phase: kind === "phase" ? $("habitPhaseSelect").value : null,
     targetCount: Math.max(1, Number($("habitTargetInput").value) || 1),
     reminderTimes,
+    remindOnAppStart: $("habitAppStartReminder").checked,
+    remindOnPhaseStart: $("habitPhaseStartReminder").checked,
     remindBeforePhaseEnd: kind === "phase" && $("habitPhaseEndReminder").checked,
     days: days.length ? days : [0, 1, 2, 3, 4, 5, 6],
     createdAt: new Date().toISOString(),
-  });
+  };
+  if (editingHabitId) {
+    const index = habits.findIndex(habit => habit.id === editingHabitId);
+    if (index >= 0) habits[index] = { ...habits[index], ...record, id:editingHabitId, createdAt:habits[index].createdAt, updatedAt:new Date().toISOString() };
+  } else habits.push(record);
   writeHabits(habits);
+  editingHabitId = null;
   $("habitFormDialog").close();
   render();
 }
@@ -418,9 +473,9 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-$("addHabitBtn").addEventListener("click", openHabitForm);
+$("addHabitBtn").addEventListener("click", () => openHabitForm());
 $("habitForm").addEventListener("submit", saveHabit);
-$("cancelHabitFormBtn").addEventListener("click", () => $("habitFormDialog").close());
+$("cancelHabitFormBtn").addEventListener("click", () => { editingHabitId = null; $("habitFormDialog").close(); });
 $("habitLogForm").addEventListener("submit", event => {
   event.preventDefault();
   savePendingLog();
@@ -432,7 +487,10 @@ $("habitDifficulty").addEventListener("input", event => {
 $("habitKindSelect").addEventListener("change", event => {
   $("habitPhaseSelect").classList.toggle("hidden", event.target.value !== "phase");
   $("habitPhaseEndReminder").parentElement.classList.toggle("hidden", event.target.value !== "phase");
+  renderReminderPresets();
 });
+$("habitPhaseSelect").addEventListener("change", renderReminderPresets);
+$("habitReminderTimes").addEventListener("input", renderReminderPresets);
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 
 render();

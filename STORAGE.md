@@ -55,6 +55,15 @@ asignar una tarea a una sesión conserva el mismo `projectTaskId`, por lo que su
 estado, cantidad de sesiones y tiempo acumulado continúan sincronizados con el
 video original.
 
+Cada proyecto puede guardar `startDate`, `dueDate` y `autoStartOnPlanning`. Las
+fechas se muestran como hitos de día completo en el calendario semanal. Cuando
+`autoStartOnPlanning` está activo, el primer cambio al estado `planning` asigna la
+fecha actual como inicio sin reemplazar una fecha establecida manualmente.
+
+Los hábitos admiten varios `reminderTimes`, horarios sugeridos por mañana, tarde y
+noche, `remindOnAppStart` y `remindOnPhaseStart`. Estos disparadores reutilizan el
+mismo registro diario y dejan de avisar al completar o justificar el hábito.
+
 Las subtareas se guardan como tareas normales con `parentTaskId`, por lo que cada
 una puede acumular tiempo, completarse y asignarse a sesiones de manera
 independiente. Las secciones de proyectos guardan `orientation` (`horizontal` o

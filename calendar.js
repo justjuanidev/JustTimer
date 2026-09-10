@@ -9,6 +9,7 @@ const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 const SLOT_HEIGHT = 28;
 const GOOGLE_SYNC_KEY = "justtimer.googleCalendarSync.v1";
 const CHANNEL_GOALS_KEY = "justtimer.channelGoals.v1";
+const OPEN_PROJECT_KEY = "justtimer.openProjectId.v1";
 
 let weekStart = startOfWeek(new Date());
 let selectedStart = null;
@@ -257,12 +258,23 @@ function renderCalendar() {
   const oldScroll = grid.querySelector(".calendar-scroll")?.scrollTop;
   const now = new Date(), calendarHeight = 96 * SLOT_HEIGHT;
   const visibleKeys = new Set(days.map(dateKey));
-  const byDay = new Map(days.map(day => [dateKey(day), []])), channelMap = new Map(readWorkChannels().map(channel => [channel.id, channel])), projectMap = new Map(readProjects().map(project => [project.id, project]));
+  const byDay = new Map(days.map(day => [dateKey(day), []])), milestoneByDay = new Map(days.map(day => [dateKey(day), []])), channelMap = new Map(readWorkChannels().map(channel => [channel.id, channel])), projectMap = new Map(readProjects().map(project => [project.id, project]));
   readSessions().filter(session => session.status !== "cancelled").forEach(session => {
     const start = new Date(session.startAt), key = dateKey(start);
     if (!Number.isNaN(start.getTime()) && visibleKeys.has(key)) byDay.get(key).push({ session, start });
   });
-  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head">${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
+  projectMap.forEach(project => {
+    if (project.archived) return;
+    if (project.startDate && visibleKeys.has(project.startDate)) milestoneByDay.get(project.startDate).push({ project, kind:"start" });
+    if (project.dueDate && visibleKeys.has(project.dueDate)) milestoneByDay.get(project.dueDate).push({ project, kind:"due" });
+  });
+  const milestoneHeight = Math.max(32, Math.max(0, ...milestoneByDay.values().map(items => items.length)) * 24 + 6);
+  const milestoneCell = day => (milestoneByDay.get(dateKey(day)) || []).map(({ project, kind }) => `<button class="project-milestone ${kind}" data-project-id="${escapeAttr(project.id)}" title="Abrir ${escapeAttr(project.title)}"><b>${kind === "start" ? "▶" : "◆"}</b><span>${kind === "start" ? "Inicio" : "Límite"} · ${escapeHtml(project.title)}</span></button>`).join("");
+  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content" style="--day-count:${days.length}"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head">${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</div>`).join("")}</div><div class="calendar-milestone-row" style="height:${milestoneHeight}px"><div class="milestone-label">Proyectos</div>${days.map(day => `<div class="milestone-day">${milestoneCell(day)}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
+  grid.querySelectorAll(".project-milestone").forEach(button => button.addEventListener("click", () => {
+    localStorage.setItem(OPEN_PROJECT_KEY, button.dataset.projectId);
+    ipcRenderer.send("open-day-tasks");
+  }));
   days.forEach(day => {
     const column = grid.querySelector(`[data-calendar-day="${dateKey(day)}"]`);
     (byDay.get(dateKey(day)) || []).sort((a, b) => a.start - b.start).forEach(({ session, start }) => {
@@ -854,6 +866,8 @@ $("goalForm").addEventListener("submit", event => {
   localStorage.setItem(CHANNEL_GOALS_KEY, JSON.stringify(goals)); ipcRenderer.send("data-changed"); $("goalDialog").close(); renderChannelGoals();
 });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
+window.addEventListener("focus", renderCalendar);
+window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY].includes(event.key)) renderCalendar(); });
 
 renderTaskPlanner();
 renderCalendar();

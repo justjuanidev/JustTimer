@@ -48,7 +48,7 @@
 
   <dialog class="habit-dialog" id="habitFormDialog">
     <form class="habit-form" id="habitForm">
-      <div class="review-title">Nuevo habito</div>
+      <div class="review-title" id="habitFormTitle">Nuevo hábito</div>
       <input class="tool-input" id="habitNameInput" maxlength="80" placeholder="Nombre del habito" />
       <select class="tool-select" id="habitTypeSelect">
         <option value="routine">Rutina · hecho, pendiente o justificado</option>
@@ -66,6 +66,11 @@
       <input class="tool-input" id="habitTargetInput" type="number" min="1" max="20" value="1" placeholder="Veces por dia" />
       <label class="review-label" for="habitReminderTimes">Recordatorios (varias horas, separadas por coma)</label>
       <input class="tool-input" id="habitReminderTimes" placeholder="08:00, 11:30, 18:00" />
+      <div class="habit-reminder-presets" id="habitReminderPresets"></div>
+      <div class="habit-trigger-options">
+        <label class="habit-day"><input type="checkbox" id="habitAppStartReminder" /><span>Al abrir JustTimer</span></label>
+        <label class="habit-day"><input type="checkbox" id="habitPhaseStartReminder" /><span>Al comenzar la etapa</span></label>
+      </div>
       <label class="habit-day"><input type="checkbox" id="habitPhaseEndReminder" checked /><span>Avisar 15 min antes de cambiar de etapa</span></label>
       <div class="habit-days" id="habitDays"></div>
       <div class="note-actions">

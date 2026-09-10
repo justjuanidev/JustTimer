@@ -129,12 +129,13 @@ let snapshotTimer = null;
 let snapshotSource = null;
 let googleCalendar;
 const notifiedHabitKeys = new Set();
+const APP_OPENED_AT = Date.now();
 
 function showDueHabitNotifications(reminders = []) {
   const now = Date.now();
   reminders.forEach(reminder => {
     const at = new Date(reminder.at).getTime();
-    const key = `${reminder.habitId}:${reminder.at}:${reminder.kind || "time"}`;
+    const key = reminder.notificationKey || `${reminder.habitId}:${reminder.at}:${reminder.kind || "time"}`;
     if (notifiedHabitKeys.has(key) || at < now - 65000 || at > now) return;
     notifiedHabitKeys.add(key);
     if (Notification.isSupported()) {
@@ -174,6 +175,14 @@ async function checkHabitNotifications() {
       if (current.justified || Number(current.count) >= Math.max(1, Number(habit.targetCount) || 1)) return;
       (habit.reminderTimes || []).forEach(time => { const [hour, minute] = time.split(":").map(Number), at = new Date(now); at.setHours(hour, minute, 0, 0); reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name} sigue pendiente`, kind: "time" }); });
       if (habit.kind === "phase" && habit.remindBeforePhaseEnd) { const ends = { morning: 12, afternoon: 19, night: 28 }, end = ends[habit.phase]; if (end) { const at = new Date(now); at.setHours(end % 24, 0, 0, 0); if (end >= 24) at.setDate(at.getDate() + 1); at.setMinutes(at.getMinutes() - 15); reminders.push({ habitId: habit.id, name:habit.name, at: at.toISOString(), body: `${habit.name}: faltan 15 minutos para cambiar de etapa`, kind: "phase-end" }); } }
+      if (habit.remindOnAppStart && Date.now() - APP_OPENED_AT < 90000) reminders.push({ habitId:habit.id, name:habit.name, at:now.toISOString(), body:`${habit.name} está pendiente al iniciar JustTimer`, kind:"app-start", notificationKey:`${habit.id}:app-start:${APP_OPENED_AT}` });
+      if (habit.remindOnPhaseStart) {
+        const hour = now.getHours() + now.getMinutes() / 60, currentPhase = hour >= 4 && hour < 12 ? "morning" : hour >= 12 && hour < 19 ? "afternoon" : "night";
+        if (habit.kind === "daily" || habit.phase === currentPhase) {
+          const startHour = currentPhase === "morning" ? 7 : currentPhase === "afternoon" ? 12 : 19, at = new Date(now); at.setHours(startHour, 0, 0, 0);
+          reminders.push({ habitId:habit.id, name:habit.name, at:at.toISOString(), body:`${habit.name}: comenzó ${currentPhase === "morning" ? "la mañana" : currentPhase === "afternoon" ? "la tarde" : "la noche"}`, kind:`phase-start-${currentPhase}` });
+        }
+      }
     });
     showDueHabitNotifications(reminders);
   } catch (error) { log.warn("Habit notifications skipped:", error.message); }

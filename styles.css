@@ -1687,9 +1687,13 @@ body.main-window .close-btn {
 .habit-history-row span:last-child {
   overflow-wrap: anywhere;
 }
+.habit-detail-actions { display:flex; gap:8px; margin-top:10px; }
+.habit-detail-actions .tool-btn { flex:1; }
 
 .habit-dialog {
   width: min(360px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow: auto;
   border: 0;
   border-radius: 12px;
   background: rgba(31, 34, 44, 0.98);
@@ -1739,6 +1743,14 @@ body.main-window .close-btn {
   flex-direction: column;
   gap: 9px;
 }
+.habit-reminder-presets { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid rgba(255,255,255,.15); border-radius:10px; background:rgba(255,255,255,.06); }
+.reminder-preset-head { display:flex; align-items:center; justify-content:space-between; gap:8px; color:rgba(255,255,255,.72); font-size:9px; font-weight:800; }
+.reminder-preset-head button { padding:4px 7px; border-radius:6px; color:#fff; background:rgba(47,128,237,.8); font-size:9px; font-weight:850; }
+.reminder-preset-group { display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+.reminder-preset-group small { width:54px; color:rgba(255,255,255,.62); font-size:9px; font-weight:850; }
+.reminder-preset-group button { padding:5px 7px; border:1px solid rgba(255,255,255,.16); border-radius:7px; color:rgba(255,255,255,.78); background:rgba(255,255,255,.08); font-size:9px; font-weight:800; }
+.reminder-preset-group button.selected { color:#fff; background:#2563eb; border-color:#2563eb; }
+.habit-trigger-options { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 
 .habit-days {
   display: grid;
@@ -2002,11 +2014,20 @@ body.main-window .close-btn {
 /* Lightweight weekly calendar: seven columns instead of 672 interactive slots. */
 .calendar-grid { display:flex; flex-direction:column; min-height:0; overflow:hidden; }
 .calendar-week-content { width:100%; min-width:738px; }
-.calendar-head-row { position:sticky; top:0; z-index:12; display:grid; grid-template-columns:52px repeat(7,minmax(98px,1fr)); width:100%; background:#f7f8fa; }
+.calendar-head-row { position:sticky; top:0; z-index:12; display:grid; grid-template-columns:52px repeat(var(--day-count,7),minmax(98px,1fr)); width:100%; background:#f7f8fa; }
 .calendar-head-row>div { height:34px; border-right:1px solid #e6e9ee; border-bottom:1px solid #dfe3e8; }
 .calendar-head-row .cal-day-head { display:flex; align-items:center; justify-content:center; padding:0; font-size:11px; font-weight:800; }
+.calendar-milestone-row { position:sticky; top:34px; z-index:11; display:grid; grid-template-columns:52px repeat(var(--day-count,7),minmax(98px,1fr)); width:100%; min-height:32px; background:#fff; box-shadow:0 2px 5px rgba(16,24,40,.06); }
+.milestone-label,.milestone-day { min-width:0; padding:3px; border-right:1px solid #e6e9ee; border-bottom:1px solid #dfe3e8; }
+.milestone-label { display:flex; align-items:center; justify-content:center; padding:2px; color:#8a919c; background:#fafbfc; font-size:7px; font-weight:900; text-transform:uppercase; writing-mode:vertical-rl; }
+.milestone-day { display:flex; flex-direction:column; gap:3px; background:#fff; }
+.project-milestone { display:flex; align-items:center; gap:4px; width:100%; min-height:21px; padding:3px 5px; overflow:hidden; border-radius:5px; text-align:left; font-size:8px; font-weight:800; }
+.project-milestone span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-milestone.start { color:#155e75; background:#cffafe; border-left:3px solid #0891b2; }
+.project-milestone.due { color:#9f1239; background:#ffe4e6; border-left:3px solid #e11d48; }
+.project-milestone:hover { filter:brightness(.97); transform:translateY(-1px); }
 .calendar-scroll { min-height:0; flex:1; overflow:auto; }
-.calendar-canvas { display:grid; grid-template-columns:52px repeat(7,minmax(98px,1fr)); width:100%; position:relative; }
+.calendar-canvas { display:grid; grid-template-columns:52px repeat(var(--day-count,7),minmax(98px,1fr)); width:100%; position:relative; }
 .calendar-time-axis,.calendar-day-column { position:relative; height:2688px; }
 .calendar-time-axis { background:#fafbfc; border-right:1px solid #dfe3e8; }
 .calendar-time-label { position:absolute; right:7px; transform:translateY(-7px); color:#77808d; font-size:10px; }

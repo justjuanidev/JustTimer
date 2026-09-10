@@ -44,6 +44,9 @@
         <input class="light-input" id="projectName" maxlength="80" placeholder="Título del video" required />
         <select class="light-select" id="projectChannel" title="Canal o sección"></select>
         <select class="light-select" id="projectStatus" title="Estado"></select>
+        <label class="project-date-field"><span>Fecha de inicio</span><input class="light-input" id="projectStartDate" type="date" /></label>
+        <label class="project-date-field"><span>Fecha límite</span><input class="light-input" id="projectDueDate" type="date" /></label>
+        <label class="project-auto-start"><input id="projectAutoStart" type="checkbox" checked /><span>Definir inicio al pasar a Plani</span></label>
         <input class="light-input" id="projectImage" type="url" placeholder="URL de miniatura (opcional)" />
         <button class="ui-btn quiet" type="button" id="uploadProjectImageBtn">Subir miniatura</button>
         <button class="ui-btn primary" type="submit">Crear video</button>

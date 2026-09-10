@@ -9,6 +9,7 @@ const SESSIONS_KEY = "justtimer.sessions.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
 const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 const SHORTS_SECTION_MIGRATION_KEY = "justtimer.shortsSectionCreated.v1";
+const OPEN_PROJECT_KEY = "justtimer.openProjectId.v1";
 const STATUSES = [
   { id: "idea", label: "Idea", icon: "✦" }, { id: "framing", label: "Framing", icon: "▣" },
   { id: "packaging", label: "Packaging", icon: "◆" }, { id: "planning", label: "Plani", icon: "▤" },
@@ -131,7 +132,8 @@ function projectCard(project, orientation = "horizontal") {
   const stats = projectStats(project), status = statusInfo(project.status), article = document.createElement("article");
   article.className = `video-project-card ${orientation === "vertical" ? "vertical-card" : ""}`; article.draggable = true; article.dataset.projectId = project.id;
   const thumbnail = project.imageUrl ? `<img class="project-thumbnail" src="${esc(project.imageUrl)}" alt="" />` : emptyThumbnail(project);
-  article.innerHTML = `<button class="thumbnail-button" type="button" aria-label="Abrir ${esc(project.title)}">${thumbnail}<span class="status-badge status-${status.id}">${status.icon} ${status.label}</span><span class="hours-badge">${stats.hours.toFixed(1)} h</span></button><div class="video-card-info"><div class="video-card-copy"><h3 title="Doble clic para editar">${esc(project.title)}</h3><p>${stats.pending} pendientes · ${stats.tasks} tareas · ${stats.sessions} sesiones</p></div><button class="card-menu" type="button" title="Opciones">•••</button><div class="card-popover hidden"><button data-action="rename">Editar título</button><button data-action="move">Mover a otro canal</button><button data-action="status">Avanzar estado</button><button data-action="archive">${project.archived ? "Restaurar" : "Archivar"}</button><button class="danger-action" data-action="delete">Borrar video/proyecto</button></div></div>`;
+  const schedule = [project.startDate ? `Inicio ${taskDateLabel(project.startDate)}` : "", project.dueDate ? `Límite ${taskDateLabel(project.dueDate)}` : ""].filter(Boolean).join(" · ");
+  article.innerHTML = `<button class="thumbnail-button" type="button" aria-label="Abrir ${esc(project.title)}">${thumbnail}<span class="status-badge status-${status.id}">${status.icon} ${status.label}</span><span class="hours-badge">${stats.hours.toFixed(1)} h</span></button><div class="video-card-info"><div class="video-card-copy"><h3 title="Doble clic para editar">${esc(project.title)}</h3><p>${stats.pending} pendientes · ${stats.tasks} tareas · ${stats.sessions} sesiones${schedule ? ` · ${esc(schedule)}` : ""}</p></div><button class="card-menu" type="button" title="Opciones">•••</button><div class="card-popover hidden"><button data-action="rename">Editar título</button><button data-action="move">Mover a otro canal</button><button data-action="status">Avanzar estado</button><button data-action="archive">${project.archived ? "Restaurar" : "Archivar"}</button><button class="danger-action" data-action="delete">Borrar video/proyecto</button></div></div>`;
   article.querySelector(".thumbnail-button").addEventListener("click", () => openProject(project.id));
   article.querySelector("h3").addEventListener("dblclick", () => renameProject(project.id));
   const popover = article.querySelector(".card-popover");
@@ -197,8 +199,9 @@ function renderDetail() {
   const stats = projectStats(project), status = statusInfo(project.status), channel = channelFor(project);
   const cover = project.imageUrl ? `<img src="${esc(project.imageUrl)}" alt="" />` : emptyThumbnail(project);
   $("projectDetailHero").classList.toggle("vertical-detail", channel?.orientation === "vertical");
-  $("projectDetailHero").innerHTML = `<div class="detail-cover">${cover}</div><div class="detail-copy"><span class="detail-eyebrow">${esc(channel?.name || "Canal")} · Video</span><h2>${esc(project.title)}</h2><div class="detail-metrics"><span><strong>${stats.tasks}</strong> tareas</span><span><strong>${stats.sessions}</strong> sesiones</span><span><strong>${stats.hours.toFixed(1)}</strong> horas</span></div></div><div class="detail-actions"><select class="status-select" id="detailStatus">${STATUSES.map(item => `<option value="${item.id}" ${item.id === status.id ? "selected" : ""}>${item.icon} ${item.label}</option>`).join("")}</select><button class="ui-btn quiet" id="renameProjectBtn">Editar título</button><button class="ui-btn quiet" id="moveProjectBtn">Mover de canal</button><button class="ui-btn quiet" id="archiveProjectBtn">${project.archived ? "Restaurar" : "Archivar"}</button><button class="ui-btn danger" id="deleteProjectBtn">Borrar</button></div>`;
-  $("detailStatus").addEventListener("change", event => updateProject(project.id, { status: event.target.value }));
+  $("projectDetailHero").innerHTML = `<div class="detail-cover">${cover}</div><div class="detail-copy"><span class="detail-eyebrow">${esc(channel?.name || "Canal")} · Video</span><h2>${esc(project.title)}</h2><div class="detail-metrics"><span><strong>${stats.tasks}</strong> tareas</span><span><strong>${stats.sessions}</strong> sesiones</span><span><strong>${stats.hours.toFixed(1)}</strong> horas</span></div><div class="project-schedule"><label><span>Inicio</span><input class="light-input" id="detailStartDate" type="date" value="${esc(project.startDate || "")}" /></label><label><span>Fecha límite</span><input class="light-input" id="detailDueDate" type="date" value="${esc(project.dueDate || "")}" /></label><label class="project-auto-start"><input id="detailAutoStart" type="checkbox" ${project.autoStartOnPlanning ? "checked" : ""}/><span>Asignar inicio al pasar a Plani</span></label><button class="ui-btn quiet" id="saveProjectDates">Guardar fechas</button></div></div><div class="detail-actions"><select class="status-select" id="detailStatus">${STATUSES.map(item => `<option value="${item.id}" ${item.id === status.id ? "selected" : ""}>${item.icon} ${item.label}</option>`).join("")}</select><button class="ui-btn quiet" id="renameProjectBtn">Editar título</button><button class="ui-btn quiet" id="moveProjectBtn">Mover de canal</button><button class="ui-btn quiet" id="archiveProjectBtn">${project.archived ? "Restaurar" : "Archivar"}</button><button class="ui-btn danger" id="deleteProjectBtn">Borrar</button></div>`;
+  $("detailStatus").addEventListener("change", event => updateProjectStatus(project, event.target.value));
+  $("saveProjectDates").addEventListener("click", () => saveProjectDates(project.id));
   $("renameProjectBtn").addEventListener("click", () => renameProject(project.id));
   $("moveProjectBtn").addEventListener("click", () => openMoveProjectDialog(project.id));
   $("archiveProjectBtn").addEventListener("click", () => archiveProject(project.id, true));
@@ -312,8 +315,20 @@ function assignToNextSessions(task) {
 }
 
 function updateProject(id, patch) { writeArray(PROJECTS_KEY, projects().map(project => project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)); projectId ? renderDetail() : renderLibrary(); }
+function updateProjectStatus(project, status) {
+  const patch = { status };
+  if (status === "planning" && project.autoStartOnPlanning && !project.startDate) patch.startDate = todayKey();
+  updateProject(project.id, patch);
+}
+function saveProjectDates(id) {
+  const startDate = $("detailStartDate").value || null, dueDate = $("detailDueDate").value || null;
+  if (startDate && dueDate && startDate > dueDate) { alert("La fecha de inicio no puede ser posterior a la fecha límite."); return; }
+  const autoStartOnPlanning = $("detailAutoStart").checked, project = projects().find(item => item.id === id), patch = { startDate, dueDate, autoStartOnPlanning };
+  if (!startDate && autoStartOnPlanning && project?.status === "planning") patch.startDate = todayKey();
+  updateProject(id, patch);
+}
 function renameProject(id) { const project = projects().find(item => item.id === id); if (project) openProjectEditor({ eyebrow:"Video / proyecto", title:"Editar título", label:"Título", value:project.title, onSave:({text}) => updateProject(id, { title:text }) }); }
-function cycleProjectStatus(id) { const project = projects().find(item => item.id === id), current = STATUSES.findIndex(item => item.id === (project?.status || "idea")); updateProject(id, { status: STATUSES[(current + 1) % STATUSES.length].id }); }
+function cycleProjectStatus(id) { const project = projects().find(item => item.id === id), current = STATUSES.findIndex(item => item.id === (project?.status || "idea")); if (project) updateProjectStatus(project, STATUSES[(current + 1) % STATUSES.length].id); }
 function archiveProject(id, leaveDetail = false) {
   const project = projects().find(item => item.id === id); if (!project) return;
   writeArray(PROJECTS_KEY, projects().map(item => item.id === id ? { ...item, archived: !project.archived, archivedAt: !project.archived ? new Date().toISOString() : null } : item));
@@ -404,6 +419,7 @@ function openProjectEditor({ eyebrow="Editar", title="Editar", label="Nombre", v
 function closeProjectEditor() { pendingEditorSave = null; $("projectEditDialog").close(); }
 function openProjectForm(channelId) {
   renderProjectFormOptions(); if (channelId) $("projectChannel").value = channelId;
+  $("projectStartDate").value = ""; $("projectDueDate").value = ""; $("projectAutoStart").checked = true;
   closeForms(); $("projectForm").classList.remove("hidden"); $("projectName").focus();
 }
 function closeForms() { $("projectForm").classList.add("hidden"); $("channelForm").classList.add("hidden"); $("workChannelForm").classList.add("hidden"); }
@@ -452,8 +468,11 @@ $("workChannelForm").addEventListener("submit", event => {
 });
 $("projectForm").addEventListener("submit", event => {
   event.preventDefault(); const title = $("projectName").value.trim(); if (!title) return;
+  let startDate = $("projectStartDate").value || null; const dueDate = $("projectDueDate").value || null, autoStartOnPlanning = $("projectAutoStart").checked, status = $("projectStatus").value;
+  if (!startDate && autoStartOnPlanning && status === "planning") startDate = todayKey();
+  if (startDate && dueDate && startDate > dueDate) { alert("La fecha de inicio no puede ser posterior a la fecha límite."); return; }
   const all = projects(), channelId = $("projectChannel").value;
-  all.push({ id: uid(), title, imageUrl: selectedProjectImage || $("projectImage").value.trim() || null, mode: mode === "work" ? "work" : "personal", workChannelId: mode, channelId, type: "video", status: $("projectStatus").value, order: all.filter(item => item.channelId === channelId).length, archived: false, createdAt: new Date().toISOString() });
+  all.push({ id: uid(), title, imageUrl: selectedProjectImage || $("projectImage").value.trim() || null, mode: mode === "work" ? "work" : "personal", workChannelId: mode, channelId, type: "video", status, startDate, dueDate, autoStartOnPlanning, order: all.filter(item => item.channelId === channelId).length, archived: false, createdAt: new Date().toISOString() });
   writeArray(PROJECTS_KEY, all); $("projectName").value = ""; $("projectImage").value = ""; selectedProjectImage = null;
   $("uploadProjectImageBtn").textContent = "Subir miniatura"; closeForms(); renderLibrary();
 });
@@ -462,7 +481,11 @@ document.addEventListener("click", event => { if (!event.target.closest(".card-m
 window.addEventListener("focus", () => projectId ? renderDetail() : renderLibrary());
 window.addEventListener("storage", event => {
   if ([DAY_TASKS_KEY, SESSIONS_KEY, TASKS_KEY].includes(event.key)) projectId ? renderDetail() : renderLibrary();
+  if (event.key === OPEN_PROJECT_KEY && event.newValue) { const target = projects().find(item => item.id === event.newValue && !item.archived); if (target) openProject(target.id); localStorage.removeItem(OPEN_PROJECT_KEY); }
 });
 
 syncDueTasksToToday(); ensureWorkChannels(); ensureChannels();
 renderLibrary();
+const requestedProjectId = localStorage.getItem(OPEN_PROJECT_KEY);
+if (requestedProjectId && projects().some(item => item.id === requestedProjectId && !item.archived)) openProject(requestedProjectId);
+localStorage.removeItem(OPEN_PROJECT_KEY);
