@@ -10,7 +10,6 @@ const PROJECT_CHANNELS_KEY = "justtimer.projectChannels.v1";
 const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 const SLOT_HEIGHT = 28;
 const GOOGLE_SYNC_KEY = "justtimer.googleCalendarSync.v1";
-const CHANNEL_GOALS_KEY = "justtimer.channelGoals.v1";
 const WEEKLY_PLANS_KEY = "justtimer.weeklyPlans.v1";
 const WEEKLY_PROMPT_KEY = "justtimer.weeklyPlanPrompted.v1";
 const OPEN_PROJECT_KEY = "justtimer.openProjectId.v1";
@@ -23,12 +22,12 @@ let visibleDays = 7;
 let didAutoScroll = false;
 let registerMode = false;
 let taskPlannerOpen = false;
-let editingGoalChannelId = null;
 let calendarMode = "week";
 let monthYear = new Date().getFullYear();
 let selectedMonth = new Date().getMonth();
 let googleSyncInFlight = null;
 let calendarRenderQueued = false;
+let calendarClockDay = dateKey(new Date());
 const expandedPlannerTaskIds = new Set();
 
 function $(id) {
@@ -46,10 +45,6 @@ function readSessions() {
 
 function writeSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-}
-
-function readChannelGoals() {
-  try { const value = JSON.parse(localStorage.getItem(CHANNEL_GOALS_KEY) || "{}"); return value && typeof value === "object" ? value : {}; } catch { return {}; }
 }
 
 function readWeeklyPlans() {
@@ -78,10 +73,10 @@ function formatMinutes(minutes) {
   return hours ? `${hours}h${rest ? ` ${rest}m` : ""}` : `${rest}m`;
 }
 
-function weeklyResult(date, plan = planForWeek(date)) {
-  const start = startOfWeek(date), end = addDays(start, 7), projects = readProjects();
+function weeklyResult(date, plan = planForWeek(date), allSessions = readSessions(), projects = readProjects()) {
+  const start = startOfWeek(date), end = addDays(start, 7);
   const projectMap = new Map(projects.map(project => [project.id, project]));
-  const sessions = completedSessionsInRange(start, end);
+  const sessions = completedSessionsInRange(start, end, allSessions);
   const byChannel = new Map();
   const byDay = new Map(Array.from({ length: 7 }, (_, index) => [dateKey(addDays(start, index)), 0]));
   let minutes = 0;
@@ -139,9 +134,10 @@ function statsInRange(channelId, start, end, allSessions = readSessions(), proje
   return { sessions: sessions.length, minutes: sessions.reduce((sum, session) => sum + Math.round((Number(session.durationSecs) || 0) / 60), 0) };
 }
 
-function renderChannelGoals() {
-  const box = $("channelGoals"), plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan);
-  const today=new Date(), todayStart=new Date(today); todayStart.setHours(0,0,0,0); const todayEnd=addDays(todayStart,1), selectedIsCurrent=weekKey(weekStart)===weekKey(today), projectMap=new Map(readProjects().map(project=>[project.id,project]));
+function renderChannelGoals(cache = {}) {
+  const allSessions = cache.sessions || readSessions(), projects = cache.projects || readProjects();
+  const box = $("channelGoals"), plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan, allSessions, projects);
+  const today=new Date(), todayStart=new Date(today); todayStart.setHours(0,0,0,0); const todayEnd=addDays(todayStart,1), selectedIsCurrent=weekKey(weekStart)===weekKey(today), projectMap=new Map(projects.map(project=>[project.id,project]));
   const target = Math.max(0, Number(plan?.weeklySessions) || 0), percent = planPercent(result.totalSessions, target);
   const channels = readWorkChannels().filter(channel => channel.id !== "routine");
   const flexible = Math.max(0, target - Object.values(plan?.channelTargets || {}).reduce((sum, value) => sum + (Number(value) || 0), 0));
@@ -157,7 +153,7 @@ function renderChannelGoals() {
     const actual = result.byChannel.get(channel.id) || { sessions: 0, minutes: 0 };
     const sessionTarget = Math.max(0, Number(plan?.channelTargets?.[channel.id]) || 0);
     const dailySessionTarget=channelDailyTarget(plan,channel.id);
-    const daily=selectedIsCurrent?statsInRange(channel.id,todayStart,todayEnd,readSessions(),projectMap):null;
+    const daily=selectedIsCurrent?statsInRange(channel.id,todayStart,todayEnd,allSessions,projectMap):null;
     const channelPercent = planPercent(actual.sessions, sessionTarget);
     const focused = focusChannelForPlan(plan) === channel.id;
     if (!sessionTarget && !dailySessionTarget && !actual.sessions && !focused) return "";
@@ -170,8 +166,8 @@ function renderChannelGoals() {
 }
 
 function openChannelStats(channelId) {
-  const channel = workChannelInfo(channelId), week = startOfWeek(weekStart), weekEnd = addDays(week, 7), goals = readChannelGoals(), plan = planForWeek(week);
-  const target = goals[channelId] || { dailyMinutes: 75, weeklyMinutes: 375 }, projects = readProjects(), projectMap = new Map(projects.map(project => [project.id, project]));
+  const channel = workChannelInfo(channelId), week = startOfWeek(weekStart), weekEnd = addDays(week, 7), plan = planForWeek(week);
+  const projects = readProjects(), projectMap = new Map(projects.map(project => [project.id, project]));
   const sessions = readSessions().filter(session => session.status === "done" && inferredWorkArea(session) === channelId && new Date(session.startAt) >= week && new Date(session.startAt) < weekEnd);
   const completedTasks = readDayTasks().filter(task => task.done && task.completedAt && new Date(task.completedAt) >= week && new Date(task.completedAt) < weekEnd && projectWorkChannel(projectMap.get(task.projectId)) === channelId);
   const minutes = sessions.reduce((sum, session) => sum + (Number(session.durationSecs) || 0) / 60, 0), breakMinutes = sessions.reduce((sum, session) => sum + (Number(session.breakTotalSecs) || 0) / 60, 0);
@@ -180,19 +176,13 @@ function openChannelStats(channelId) {
   sessions.forEach(session => { const name = projectMap.get(session.projectId)?.title || session.projectName || "Trabajo general"; const row = projectRows.get(name) || { minutes:0, sessions:0 }; row.minutes += (Number(session.durationSecs) || 0) / 60; row.sessions += 1; projectRows.set(name, row); });
   const dialog = $("channelStatsDialog");
   const weeklySessionTarget = Math.max(0, Number(plan?.channelTargets?.[channelId]) || 0);
-  $("channelStatsDialogContent").innerHTML = `<div class="session-dialog-head"><div><span>${fmtDate(week)} – ${fmtDate(addDays(weekEnd,-1))}</span><h2>${escapeHtml(channel.name)} · semana seleccionada</h2></div><button class="side-close" id="closeChannelStats" type="button">×</button></div><div class="channel-week-kpis"><div><strong>${(minutes / 60).toFixed(1)} h</strong><span>enfoque</span></div><div><strong>${sessions.length}${weeklySessionTarget ? `/${weeklySessionTarget}` : ""}</strong><span>sesiones</span></div><div><strong>${completedTasks.length}</strong><span>tareas hechas</span></div><div><strong>${averageEnergy === null ? "—" : averageEnergy.toFixed(1)}</strong><span>energía media</span></div></div><section class="session-dialog-section channel-goal-summary"><h3>Objetivos</h3><p>${weeklySessionTarget ? `${sessions.length} de ${weeklySessionTarget} sesiones · ${planPercent(sessions.length, weeklySessionTarget)}%<br>` : ""}${Math.round(minutes)} de ${target.weeklyMinutes} minutos · ${Math.round(minutes / Math.max(1,target.weeklyMinutes) * 100)}%</p><button class="tool-btn" id="editChannelGoal" type="button">Objetivo de minutos</button></section><section class="session-dialog-section"><h3>Distribución por video/proyecto</h3>${projectRows.size ? [...projectRows].sort((a,b)=>b[1].minutes-a[1].minutes).map(([name,row]) => `<div class="channel-project-stat"><strong>${escapeHtml(name)}</strong><span>${(row.minutes/60).toFixed(1)} h · ${row.sessions} sesiones</span></div>`).join("") : "<p>Todavía no hay sesiones terminadas esta semana.</p>"}</section><p class="channel-break-summary">Breaks registrados: ${Math.round(breakMinutes)} min</p>`;
+  const dailySessionTarget = channelDailyTarget(plan, channelId);
+  const objectiveText = weeklySessionTarget
+    ? `${sessions.length} de ${weeklySessionTarget} sesiones · ${planPercent(sessions.length, weeklySessionTarget)}%${dailySessionTarget ? `<br>${formatSessionTarget(dailySessionTarget)} por día según el plan semanal` : ""}`
+    : "Sin objetivo asignado en el plan semanal.";
+  $("channelStatsDialogContent").innerHTML = `<div class="session-dialog-head"><div><span>${fmtDate(week)} – ${fmtDate(addDays(weekEnd,-1))}</span><h2>${escapeHtml(channel.name)} · semana seleccionada</h2></div><button class="side-close" id="closeChannelStats" type="button">×</button></div><div class="channel-week-kpis"><div><strong>${(minutes / 60).toFixed(1)} h</strong><span>enfoque</span></div><div><strong>${sessions.length}${weeklySessionTarget ? `/${weeklySessionTarget}` : ""}</strong><span>sesiones</span></div><div><strong>${completedTasks.length}</strong><span>tareas hechas</span></div><div><strong>${averageEnergy === null ? "—" : averageEnergy.toFixed(1)}</strong><span>energía media</span></div></div><section class="session-dialog-section channel-goal-summary"><h3>Objetivos</h3><p>${objectiveText}</p></section><section class="session-dialog-section"><h3>Distribución por video/proyecto</h3>${projectRows.size ? [...projectRows].sort((a,b)=>b[1].minutes-a[1].minutes).map(([name,row]) => `<div class="channel-project-stat"><strong>${escapeHtml(name)}</strong><span>${(row.minutes/60).toFixed(1)} h · ${row.sessions} sesiones</span></div>`).join("") : "<p>Todavía no hay sesiones terminadas esta semana.</p>"}</section><p class="channel-break-summary">Breaks registrados: ${Math.round(breakMinutes)} min</p>`;
   $("closeChannelStats").addEventListener("click", () => dialog.close());
-  $("editChannelGoal").addEventListener("click", () => { dialog.close(); editChannelGoal(channelId); });
   dialog.showModal();
-}
-
-function editChannelGoal(channelId) {
-  const goals = readChannelGoals(), current = goals[channelId] || { dailyMinutes: 75, weeklyMinutes: 375 };
-  editingGoalChannelId = channelId;
-  $("goalChannelName").textContent = workAreaLabel(channelId);
-  $("goalDailyMinutes").value = current.dailyMinutes;
-  $("goalWeeklyMinutes").value = current.weeklyMinutes;
-  $("goalDialog").showModal();
 }
 
 async function syncGoogleCalendar(showFeedback = true) {
@@ -384,8 +374,10 @@ function renderCalendar() {
   const oldScroll = grid.querySelector(".calendar-scroll")?.scrollTop;
   const now = new Date(), calendarHeight = 96 * SLOT_HEIGHT;
   const visibleKeys = new Set(days.map(dateKey));
-  const byDay = new Map(days.map(day => [dateKey(day), []])), milestoneByDay = new Map(days.map(day => [dateKey(day), []])), channelMap = new Map(readWorkChannels().map(channel => [channel.id, channel])), projectMap = new Map(readProjects().map(project => [project.id, project]));
-  readSessions().filter(session => session.status !== "cancelled").forEach(session => {
+  const sessions = readSessions(), projects = readProjects();
+  const byDay = new Map(days.map(day => [dateKey(day), []])), milestoneByDay = new Map(days.map(day => [dateKey(day), []])), channelMap = new Map(readWorkChannels().map(channel => [channel.id, channel])), projectMap = new Map(projects.map(project => [project.id, project]));
+  sessions.forEach(session => {
+    if (session.status === "cancelled") return;
     const start = new Date(session.startAt), key = dateKey(start);
     if (!Number.isNaN(start.getTime()) && visibleKeys.has(key)) byDay.get(key).push({ session, start });
   });
@@ -397,30 +389,21 @@ function renderCalendar() {
   const milestoneStack = Math.max(0, ...[...milestoneByDay.values()].map(items => items.length));
   const milestoneHeight = milestoneStack ? milestoneStack * 24 + 6 : 0;
   const milestoneCell = day => (milestoneByDay.get(dateKey(day)) || []).map(({ project, kind }) => `<button class="project-milestone ${kind}" data-project-id="${escapeAttr(project.id)}" title="Abrir ${escapeAttr(project.title)}"><b>${kind === "start" ? "▶" : "◆"}</b><span>${kind === "start" ? "Inicio" : "Límite"} · ${escapeHtml(project.title)}</span></button>`).join("");
-  const plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan);
+  const plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan, sessions, projects);
   const dailyBadge = day => { const count = result.byDay.get(dateKey(day)) || 0, target = Math.max(0, Number(plan?.dailySessions) || 0), index = Math.round((startOfWeek(day) - startOfWeek(weekStart)) / 86400000) + ((day.getDay() + 6) % 7), planned = plan?.plannedDays?.includes(index); return target ? `<small class="daily-rhythm ${count >= target ? "reached" : ""} ${planned ? "planned" : "extra"}">${count}/${target}${count >= target ? " ✓" : ""}</small>` : ""; };
   grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content" style="--day-count:${days.length}"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head"><span>${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</span>${dailyBadge(day)}</div>`).join("")}</div><div class="calendar-milestone-row" style="height:${milestoneHeight}px"><div class="milestone-label"></div>${days.map(day => `<div class="milestone-day">${milestoneCell(day)}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
-  grid.querySelectorAll(".project-milestone").forEach(button => button.addEventListener("click", () => {
-    localStorage.setItem(OPEN_PROJECT_KEY, button.dataset.projectId);
-    ipcRenderer.send("open-day-tasks");
-  }));
   days.forEach(day => {
     const column = grid.querySelector(`[data-calendar-day="${dateKey(day)}"]`);
     (byDay.get(dateKey(day)) || []).sort((a, b) => a.start - b.start).forEach(({ session, start }) => {
       const chip = document.createElement("button");
       const minutes = start.getHours() * 60 + start.getMinutes();
       chip.type = "button";
+      chip.dataset.sessionId = session.id;
       const area = session.workArea || projectWorkChannel(projectMap.get(session.projectId));
       chip.className = `session-chip area-${area} ${energyClass(session.energy)} ${selectedSessionId === session.id ? "session-selected" : ""}`;
       chip.style.top = `${minutes / 15 * SLOT_HEIGHT + 2}px`;
       chip.style.height = `${Math.max(24, (Number(session.durationSecs) || 900) / 900 * SLOT_HEIGHT - 4)}px`;
       chip.innerHTML = sessionPreview(session, start, channelMap.get(area) || { id:area, name:workAreaLabel(area) });
-      chip.addEventListener("click", event => {
-        event.stopPropagation(); selectedSessionId = session.id;
-        const end = start.getTime() + (Number(session.durationSecs) || 0) * 1000;
-        if (session.status === "done" || end <= Date.now()) openSessionDialog(session);
-        else openFutureSessionDialog(session);
-      });
       column.appendChild(chip);
     });
     if (dateKey(day) === dateKey(now)) {
@@ -431,7 +414,44 @@ function renderCalendar() {
   const scroll = grid.querySelector(".calendar-scroll");
   if (Number.isFinite(oldScroll)) scroll.scrollTop = oldScroll;
   else if (!didAutoScroll) { scroll.scrollTop = Math.max(0, (now.getHours() * 4 - 4) * SLOT_HEIGHT); didAutoScroll = true; }
-  renderChannelGoals();
+  renderChannelGoals({ sessions, projects });
+}
+
+function handleCalendarGridClick(event) {
+  const milestone = event.target.closest(".project-milestone");
+  if (milestone) {
+    localStorage.setItem(OPEN_PROJECT_KEY, milestone.dataset.projectId);
+    ipcRenderer.send("open-day-tasks");
+    return;
+  }
+  const chip = event.target.closest(".session-chip[data-session-id]");
+  if (chip) {
+    event.stopPropagation();
+    const session = readSessions().find(item => item.id === chip.dataset.sessionId);
+    if (!session) return;
+    selectedSessionId = session.id;
+    const start = new Date(session.startAt), end = start.getTime() + (Number(session.durationSecs) || 0) * 1000;
+    if (session.status === "done" || end <= Date.now()) openSessionDialog(session);
+    else openFutureSessionDialog(session);
+  }
+}
+
+function updateCalendarNowLine() {
+  if (calendarMode !== "week") return;
+  const now = new Date(), grid = $("calendarGrid");
+  const currentDay = dateKey(now);
+  if (currentDay !== calendarClockDay) {
+    calendarClockDay = currentDay;
+    scheduleCalendarRender();
+    return;
+  }
+  grid.querySelectorAll(".calendar-now-line").forEach(line => line.remove());
+  const column = grid.querySelector(`[data-calendar-day="${currentDay}"]`);
+  if (!column) return;
+  const line = document.createElement("i");
+  line.className = "calendar-now-line";
+  line.style.top = `${(now.getHours() * 60 + now.getMinutes()) / 15 * SLOT_HEIGHT}px`;
+  column.appendChild(line);
 }
 
 function cell(className, text) {
@@ -494,7 +514,7 @@ function openSessionDialog(session) {
     const workArea = $("popupWorkArea").value, projectId = $("popupProject").value || null;
     const project = findAssignableProject(projectId);
     writeSessions(readSessions().map(item => item.id === session.id ? { ...item, workArea, workAreaName: workAreaLabel(workArea), projectId, projectName: project?.title || null } : item));
-    ipcRenderer.send("session-created"); dialog.close(); renderCalendar(); renderChannelGoals();
+    ipcRenderer.send("session-created"); dialog.close(); renderCalendar();
   });
   $("deletePopupSession").addEventListener("click", () => {
     if (!window.confirm(`¿Seguro que querés borrar la sesión del ${fmtDate(start)} a las ${fmtHour(start)}?`)) return;
@@ -1029,8 +1049,10 @@ function monthWeeks(year, month) {
   return rows;
 }
 
-function importantItemsForDay(date) {
-  const key=dateKey(date), projects=readProjects().filter(project=>!project.archived), tasks=readDayTasks().filter(task=>!task.deleted && task.dueDate===key), sessions=readSessions().filter(session=>session.status!=="cancelled" && sameDayKey(session.startAt,key));
+function importantItemsForDay(date, cache = {}) {
+  const key=dateKey(date);
+  if (cache.itemsByDay) return cache.itemsByDay.get(key) || [];
+  const projects=(cache.projects || readProjects()).filter(project=>!project.archived), tasks=(cache.tasks || readDayTasks()).filter(task=>!task.deleted && task.dueDate===key), sessions=(cache.sessions || readSessions()).filter(session=>session.status!=="cancelled" && sameDayKey(session.startAt,key));
   return [
     ...projects.filter(project=>project.startDate===key).map(project=>({kind:"start",label:`Inicio — ${project.title}`})),
     ...projects.filter(project=>project.dueDate===key).map(project=>({kind:"due",label:`Entrega — ${project.title}`})),
@@ -1039,23 +1061,30 @@ function importantItemsForDay(date) {
   ];
 }
 
-function monthSummary(year,month) {
-  const start=new Date(year,month,1),end=new Date(year,month+1,1),sessions=completedSessionsInRange(start,end),minutes=sessions.reduce((sum,item)=>sum+sessionMinutes(item),0),plans=readWeeklyPlans();
+function monthSummary(year,month,cache = {}) {
+  const allSessions=cache.sessions || readSessions(), projects=cache.projects || readProjects(), plans=cache.plans || readWeeklyPlans();
+  const start=new Date(year,month,1),end=new Date(year,month+1,1),sessions=completedSessionsInRange(start,end,allSessions),minutes=sessions.reduce((sum,item)=>sum+sessionMinutes(item),0);
   const weekStarts=[...new Set(monthWeeks(year,month).map(row=>weekKey(row[0])))], configured=weekStarts.map(key=>plans[key]).filter(plan=>plan && new Date(`${plan.weekStart}T00:00:00`).getMonth()===month), objective=configured.reduce((sum,plan)=>sum+(Number(plan.weeklySessions)||0),0);
-  const reachedWeeks=configured.filter(plan=>weeklyResult(new Date(`${plan.weekStart}T00:00:00`),plan).totalSessions>=(Number(plan.weeklySessions)||Infinity)).length;
-  let reachedDays=0,plannedDays=0; configured.forEach(plan=>{const result=weeklyResult(new Date(`${plan.weekStart}T00:00:00`),plan); plan.plannedDays.forEach(index=>{const day=addDays(result.start,index);if(day>=start&&day<end){plannedDays+=1;if((result.byDay.get(dateKey(day))||0)>=(Number(plan.dailySessions)||Infinity))reachedDays+=1;}});});
+  const results=new Map(configured.map(plan=>[plan.weekStart,weeklyResult(new Date(`${plan.weekStart}T00:00:00`),plan,allSessions,projects)]));
+  const reachedWeeks=configured.filter(plan=>results.get(plan.weekStart).totalSessions>=(Number(plan.weeklySessions)||Infinity)).length;
+  let reachedDays=0,plannedDays=0; configured.forEach(plan=>{const result=results.get(plan.weekStart); plan.plannedDays.forEach(index=>{const day=addDays(result.start,index);if(day>=start&&day<end){plannedDays+=1;if((result.byDay.get(dateKey(day))||0)>=(Number(plan.dailySessions)||Infinity))reachedDays+=1;}});});
   return {sessions:sessions.length,minutes,objective,percent:planPercent(sessions.length,objective),reachedWeeks,weeks:configured.length,reachedDays,plannedDays};
 }
 
-function renderMonthlySummary() {
-  const summary=monthSummary(monthYear,selectedMonth), label=new Date(monthYear,selectedMonth,1).toLocaleDateString("es-AR",{month:"long",year:"numeric"});
+function renderMonthlySummary(cache = {}) {
+  const summary=monthSummary(monthYear,selectedMonth,cache), label=new Date(monthYear,selectedMonth,1).toLocaleDateString("es-AR",{month:"long",year:"numeric"});
   $("monthlySummary").innerHTML=`<div><small>Resumen mensual</small><strong>${label}</strong></div><span><b>${summary.sessions}</b> sesiones</span><span><b>${summary.objective||"—"}</b> objetivo acumulado</span><span><b>${summary.objective?`${summary.percent}%`:"—"}</b> cumplimiento</span><span><b>${formatMinutes(summary.minutes)}</b> enfocadas</span><span><b>${summary.reachedWeeks}/${summary.weeks}</b> semanas cumplidas</span><span><b>${summary.reachedDays}/${summary.plannedDays}</b> días al ritmo</span>`;
 }
 
 function renderMonthView() {
-  const grid=$("calendarGrid"); $("weekLabel").textContent=String(monthYear); renderMonthlySummary();
-  grid.innerHTML=`<div class="year-months">${Array.from({length:12},(_,month)=>{const rows=monthWeeks(monthYear,month);return `<section class="month-card ${month===selectedMonth?"selected":""}" data-select-month="${month}"><header><strong>${new Date(monthYear,month,1).toLocaleDateString("es-AR",{month:"long"})}</strong><small>${monthYear}</small></header><div class="month-weekdays">${DAYS.map(day=>`<span>${day.slice(0,1)}</span>`).join("")}<span>%</span></div>${rows.map(row=>{const plan=planForWeek(row[0]),result=weeklyResult(row[0],plan),target=Number(plan?.weeklySessions)||0,percent=planPercent(result.totalSessions,target);return `<div class="month-week-row">${row.map(day=>{const inMonth=day.getMonth()===month,items=inMonth?importantItemsForDay(day):[],classes=[...new Set(items.map(item=>item.kind))].join(" ");return `<button class="month-day ${inMonth?"":"outside"} ${dateKey(day)===dateKey(new Date())?"today":""} ${classes}" ${inMonth?`data-month-day="${dateKey(day)}"`:"disabled"}><span>${day.getDate()}</span>${items.length?`<i>${items.length}</i>`:""}</button>`;}).join("")}<em title="${target?`${result.totalSessions}/${target} sesiones`:"Sin plan"}">${target?`${percent}%`:"—"}<i style="width:${Math.min(100,percent)}%"></i></em></div>`;}).join("")}</section>`;}).join("")}</div>`;
-  grid.querySelectorAll("[data-select-month]").forEach(card=>card.querySelector("header").addEventListener("click",()=>{selectedMonth=Number(card.dataset.selectMonth);grid.querySelectorAll(".month-card").forEach(item=>item.classList.toggle("selected",item===card));renderMonthlySummary();card.scrollIntoView({behavior:"smooth",block:"start"});}));
+  const grid=$("calendarGrid"), cache={sessions:readSessions(),projects:readProjects(),tasks:readDayTasks(),plans:readWeeklyPlans(),itemsByDay:new Map()};
+  const addItem=(key,item)=>cache.itemsByDay.set(key,[...(cache.itemsByDay.get(key)||[]),item]);
+  cache.projects.filter(project=>!project.archived).forEach(project=>{if(project.startDate)addItem(project.startDate,{kind:"start",label:`Inicio — ${project.title}`});if(project.dueDate)addItem(project.dueDate,{kind:"due",label:`Entrega — ${project.title}`});});
+  cache.tasks.filter(task=>!task.deleted&&task.dueDate).forEach(task=>addItem(task.dueDate,{kind:"task",label:`Fecha límite — ${task.text}`}));
+  cache.sessions.filter(session=>session.status!=="cancelled").forEach(session=>{const key=dateKey(new Date(session.startAt));addItem(key,{kind:session.source==="google-focusmate"?"external":"session",label:`${session.source==="google-focusmate"?"Focusmate":"Sesión"} — ${fmtHour(new Date(session.startAt))}${session.projectName?` · ${session.projectName}`:""}`,session});});
+  $("weekLabel").textContent=String(monthYear); renderMonthlySummary(cache);
+  grid.innerHTML=`<div class="year-months">${Array.from({length:12},(_,month)=>{const rows=monthWeeks(monthYear,month);return `<section class="month-card ${month===selectedMonth?"selected":""}" data-select-month="${month}"><header><strong>${new Date(monthYear,month,1).toLocaleDateString("es-AR",{month:"long"})}</strong><small>${monthYear}</small></header><div class="month-weekdays">${DAYS.map(day=>`<span>${day.slice(0,1)}</span>`).join("")}<span>%</span></div>${rows.map(row=>{const plan=cache.plans[weekKey(row[0])]||null,result=weeklyResult(row[0],plan,cache.sessions,cache.projects),target=Number(plan?.weeklySessions)||0,percent=planPercent(result.totalSessions,target);return `<div class="month-week-row">${row.map(day=>{const inMonth=day.getMonth()===month,items=inMonth?importantItemsForDay(day,cache):[],classes=[...new Set(items.map(item=>item.kind))].join(" ");return `<button class="month-day ${inMonth?"":"outside"} ${dateKey(day)===dateKey(new Date())?"today":""} ${classes}" ${inMonth?`data-month-day="${dateKey(day)}"`:"disabled"}><span>${day.getDate()}</span>${items.length?`<i>${items.length}</i>`:""}</button>`;}).join("")}<em title="${target?`${result.totalSessions}/${target} sesiones`:"Sin plan"}">${target?`${percent}%`:"—"}<i style="width:${Math.min(100,percent)}%"></i></em></div>`;}).join("")}</section>`;}).join("")}</div>`;
+  grid.querySelectorAll("[data-select-month]").forEach(card=>card.querySelector("header").addEventListener("click",()=>{selectedMonth=Number(card.dataset.selectMonth);grid.querySelectorAll(".month-card").forEach(item=>item.classList.toggle("selected",item===card));renderMonthlySummary(cache);card.scrollIntoView({behavior:"smooth",block:"start"});}));
   grid.querySelectorAll("[data-month-day]").forEach(button=>button.addEventListener("click",()=>openMonthDay(button.dataset.monthDay)));
   requestAnimationFrame(()=>grid.querySelector(`.month-card[data-select-month="${selectedMonth}"]`)?.scrollIntoView({block:"start"}));
 }
@@ -1122,13 +1151,6 @@ $("googleCalendarBtn").addEventListener("click", () => { $("googleDialog").showM
 $("saveGoogleClientBtn").addEventListener("click", async () => { try { await ipcRenderer.invoke("google-calendar-configure", { clientId: $("googleClientId").value, clientSecret: $("googleClientSecret").value }); await refreshGoogleStatus(); } catch (error) { $("googleStatus").textContent = error.message; } });
 $("connectGoogleBtn").addEventListener("click", async () => { try { $("googleStatus").textContent = "Abriendo Google..."; await ipcRenderer.invoke("google-calendar-connect"); await refreshGoogleStatus(); await syncGoogleCalendar(); } catch (error) { $("googleStatus").textContent = error.message; } });
 $("syncGoogleBtn").addEventListener("click", () => syncGoogleCalendar());
-$("goalForm").addEventListener("submit", event => {
-  event.preventDefault();
-  const daily = Number($("goalDailyMinutes").value), weekly = Number($("goalWeeklyMinutes").value);
-  if (!editingGoalChannelId || !Number.isFinite(daily) || daily <= 0 || !Number.isFinite(weekly) || weekly <= 0) return;
-  const goals = readChannelGoals(); goals[editingGoalChannelId] = { dailyMinutes: Math.round(daily), weeklyMinutes: Math.round(weekly) };
-  localStorage.setItem(CHANNEL_GOALS_KEY, JSON.stringify(goals)); ipcRenderer.send("data-changed"); $("goalDialog").close(); renderChannelGoals();
-});
 $("closeWeeklyPlan").addEventListener("click", () => $("weeklyPlanDialog").close());
 $("weeklyPlanForm").addEventListener("submit", saveWeeklyPlan);
 $("usePreviousPlan").addEventListener("click", () => fillWeeklyPlanForm(previousWeeklyPlan(new Date(`${$("weeklyPlanDialog").dataset.weekStart}T00:00:00`))));
@@ -1136,6 +1158,7 @@ $("weeklySessionTarget").addEventListener("input", () => { updateFlexibleSession
 $("dailySessionTarget").addEventListener("input", updateDerivedChannelDailyTargets);
 $("weeklyChannelTargets").addEventListener("input", event => { if (event.target.matches("[data-channel-daily-target]")) event.target.dataset.derived="false"; updateFlexibleSessions(); updateDerivedChannelDailyTargets(); });
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
+$("calendarGrid").addEventListener("click", handleCalendarGridClick);
 function scheduleCalendarRender(){if(calendarRenderQueued)return;calendarRenderQueued=true;requestAnimationFrame(()=>{calendarRenderQueued=false;renderCalendar();});}
 window.addEventListener("focus", scheduleCalendarRender);
 window.addEventListener("storage", event => { if ([PROJECTS_KEY, PERSONAL_PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) scheduleCalendarRender(); });
@@ -1148,7 +1171,5 @@ setTimeout(() => {
 }, 500);
 ipcRenderer.invoke("google-calendar-status").then(status => { if (status.connected) syncGoogleCalendar(false); });
 setInterval(() => {
-  const now = new Date();
-  const currentVisible = getVisibleDays().some(day => day.toDateString() === now.toDateString());
-  if (currentVisible) renderCalendar();
+  updateCalendarNowLine();
 }, 60_000);
