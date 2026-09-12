@@ -178,6 +178,60 @@ function syncProjectTasksFromSession(sessionTasks = readTasks(), sessionId = act
   }
 }
 
+function refreshActivePlanFromSessionRecord() {
+  if (!activePendingSessionId) return;
+  const session = readSessions().find(item => item.id === activePendingSessionId);
+  if (!session || !Array.isArray(session.tasks)) return;
+  const current = readTasks();
+  if (JSON.stringify(current) === JSON.stringify(session.tasks)) return;
+  localStorage.setItem(TASKS_KEY, JSON.stringify(session.tasks));
+  const validIds = new Set(session.tasks.filter(task => !task.done && !task.deleted).map(task => task.id));
+  if (activeTaskId && !validIds.has(activeTaskId)) activeTaskId = session.tasks.find(task => !task.done && !task.deleted)?.id || null;
+  renderInlineTasks();
+  renderCurrentTask();
+}
+
+function refreshActivePlanFromCanonicalTasks() {
+  if (!activePendingSessionId) return;
+  const canonical = new Map(readProjectTasks().map(task => [task.id, task]));
+  let changed = false;
+  const next = readTasks().map(task => {
+    const source = canonical.get(linkedProjectTaskId(task));
+    if (!source) return task;
+    const patch = { text:source.text, notes:source.notes || "", priority:source.priority || "medium", category:source.category || "inbox", done:Boolean(source.done), completedAt:source.completedAt || null };
+    if (Object.entries(patch).every(([key,value]) => task[key] === value)) return task;
+    changed = true;
+    return { ...task, ...patch };
+  });
+  if (!changed) return;
+  localStorage.setItem(TASKS_KEY, JSON.stringify(next));
+  updateSession(activePendingSessionId, { tasks:next });
+  renderInlineTasks();
+  renderCurrentTask();
+}
+
+function ensureCanonicalSessionTasks(session) {
+  if (!session) return [];
+  const canonical = readProjectTasks(), known = new Set(canonical.map(task=>task.id));
+  let changed = false;
+  const linked = (Array.isArray(session.tasks) ? session.tasks : []).map(task => {
+    if (linkedProjectTaskId(task)) return task;
+    const canonicalId = `session-task-${task.id}`;
+    if (!known.has(canonicalId)) {
+      canonical.push({ id:canonicalId, text:task.text || "Tarea", done:Boolean(task.done), notes:task.notes || "", priority:task.priority || "medium", deleted:Boolean(task.deleted), category:task.category || "actionable", dueDate:null, mode:session.workArea || "routine", projectId:session.projectId || null, focusedSecs:Number(task.focusedSecs)||0, sessionFocus:{[session.id]:Number(task.focusedSecs)||0}, sessionIds:[session.id], sessionCount:1, createdAt:task.createdAt || new Date().toISOString(), migratedFromSessionTask:true });
+      known.add(canonicalId);
+    }
+    changed = true;
+    return { ...task, projectTaskId:canonicalId, movedFromDayTaskId:canonicalId };
+  });
+  if (changed) {
+    localStorage.setItem(DAY_TASKS_KEY,JSON.stringify(canonical));
+    updateSession(session.id,{tasks:linked});
+    ipcRenderer.send("data-changed");
+  }
+  return linked;
+}
+
 function reconcileProjectTaskHistory() {
   const contributions = new Map();
   readSessions().forEach(session => (session.tasks || []).forEach(task => {
@@ -861,13 +915,47 @@ function autoStartPendingSessions(pending = getPendingSessions()) {
 
   activePendingSessionId = due.id;
   const backlog = readTasks().filter(task => !task.done && !task.deleted);
-  const planned = Array.isArray(due.tasks) ? due.tasks.map(task => ({ ...task, projectTaskId: linkedProjectTaskId(task) })) : [];
+  const planned = ensureCanonicalSessionTasks(due).map(task => ({ ...task, projectTaskId: linkedProjectTaskId(task) }));
   const plannedLinks = new Set(planned.map(task => linkedProjectTaskId(task) || task.id));
   writeTasks([...planned, ...backlog.filter(task => !plannedLinks.has(linkedProjectTaskId(task) || task.id)).map(task => ({ ...task, id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, focusedSecs: 0 }))]);
   updateSession(due.id, { status: "running" });
   durationSecs = due.durationSecs;
   startAt = new Date(due.startAt);
   schedule(startAt);
+}
+
+function restoreActiveSession() {
+  const saved = readJson(ACTIVE_SESSION_KEY, null);
+  if (!saved?.sessionId) return false;
+  const session = readSessions().find(item => item.id === saved.sessionId);
+  const restoredStart = new Date(saved.startAt || session?.startAt);
+  const restoredDuration = Math.max(0, Number(saved.durationSecs || session?.durationSecs) || 0);
+  if (!session || Number.isNaN(restoredStart.getTime()) || !restoredDuration) {
+    writeActiveSession(null);
+    return false;
+  }
+  const elapsed = Math.max(0, Math.floor((Date.now() - restoredStart.getTime()) / 1000));
+  if (elapsed >= restoredDuration || session.status === "done" || session.status === "cancelled") {
+    if (session.status === "running") updateSession(session.id, { status:"done", completedAt:new Date(restoredStart.getTime() + restoredDuration * 1000).toISOString(), endedAt:new Date(restoredStart.getTime() + restoredDuration * 1000).toISOString() });
+    writeActiveSession(null);
+    return false;
+  }
+  activePendingSessionId = session.id;
+  durationSecs = restoredDuration;
+  startAt = restoredStart;
+  breakSegments = Array.isArray(saved.breakSegments) ? saved.breakSegments : (Array.isArray(session.breakSegments) ? session.breakSegments : []);
+  breakActive = Boolean(saved.breakActive);
+  activeBreakStart = saved.activeBreakStart ? new Date(saved.activeBreakStart) : null;
+  if (breakActive && activeBreakStart && !Number.isNaN(activeBreakStart.getTime())) {
+    document.body.classList.add("break-mode");
+    $("breakBtn")?.classList.add("active");
+  } else {
+    breakActive = false;
+    activeBreakStart = null;
+  }
+  localStorage.setItem(TASKS_KEY, JSON.stringify(ensureCanonicalSessionTasks(session)));
+  schedule(restoredStart);
+  return true;
 }
 
 function startSelectedNow() {
@@ -1442,7 +1530,12 @@ $("closeInlineTasks").addEventListener("click", toggleInlineTasks);
 $("openFullTasks").addEventListener("click", openTasks);
 $("inlineTaskForm").addEventListener("submit", event => {
   event.preventDefault(); const text = $("inlineTaskInput").value.trim(); if (!text) return;
-  persistInlineTasks([...readTasks(), { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, text, done: false, notes: "", priority: "medium", deleted: false, createdAt: new Date().toISOString() }]);
+  const nowIso = new Date().toISOString(), session = readSessions().find(item => item.id === activePendingSessionId);
+  const projectTask = { id:freshId(), text, done:false, notes:"", priority:"medium", deleted:false, category:"actionable", dueDate:null, mode:session?.workArea || "routine", projectId:session?.projectId || null, focusedSecs:0, sessionIds:activePendingSessionId?[activePendingSessionId]:[], sessionCount:activePendingSessionId?1:0, createdAt:nowIso };
+  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify([...readProjectTasks(), projectTask]));
+  const sessionTask = { id:freshId(), projectTaskId:projectTask.id, movedFromDayTaskId:projectTask.id, text, done:false, notes:"", priority:"medium", category:"actionable", deleted:false, focusedSecs:0, createdAt:nowIso };
+  persistInlineTasks([...readTasks(), sessionTask]);
+  ipcRenderer.send("data-changed");
   $("inlineTaskInput").value = "";
 });
 
@@ -1501,6 +1594,8 @@ window.addEventListener("storage", event => {
     if (!$("inlineTasksPanel").classList.contains("hidden")) renderInlineTasks();
     renderCurrentTask();
   }
+  if (event.key === SESSIONS_KEY) refreshActivePlanFromSessionRecord();
+  if (event.key === DAY_TASKS_KEY) refreshActivePlanFromCanonicalTasks();
   if ([PROJECTS_KEY, PERSONAL_PROJECTS_KEY, WORK_CHANNELS_KEY].includes(event.key)) renderProjectSelects();
 });
 
@@ -1522,10 +1617,11 @@ initResizeObserver();
 
 async function initializeApp() {
   reconcileProjectTaskHistory();
-  showPanel("panelSetup");
+  const restored = restoreActiveSession();
+  if (!restored) showPanel("panelSetup");
   renderHome();
   ipcRenderer.send("data-changed");
-  if (!hasDailyPriorities()) setTimeout(() => {
+  if (!restored && !hasDailyPriorities()) setTimeout(() => {
     localStorage.setItem("justtimer.priorityTargetDate.v1", todayKey());
     ipcRenderer.send("open-priorities");
   }, 500);

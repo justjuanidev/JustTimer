@@ -13,6 +13,7 @@ const GOOGLE_SYNC_KEY = "justtimer.googleCalendarSync.v1";
 const WEEKLY_PLANS_KEY = "justtimer.weeklyPlans.v1";
 const WEEKLY_PROMPT_KEY = "justtimer.weeklyPlanPrompted.v1";
 const OPEN_PROJECT_KEY = "justtimer.openProjectId.v1";
+const PLANNER_CATEGORIES = [{id:"actionable",label:"Accionable"},{id:"inbox",label:"Inbox"},{id:"incubator",label:"Incubadora"},{id:"snooze",label:"Snooze"},{id:"all",label:"Todas"}];
 
 let weekStart = startOfWeek(new Date());
 let selectedStart = null;
@@ -22,6 +23,7 @@ let visibleDays = 7;
 let didAutoScroll = false;
 let registerMode = false;
 let taskPlannerOpen = false;
+let plannerCategory = "actionable";
 let calendarMode = "week";
 let monthYear = new Date().getFullYear();
 let selectedMonth = new Date().getMonth();
@@ -230,7 +232,7 @@ function findAssignableProject(id) {
 }
 
 function readTaskProjects() {
-  return [...readProjects(), ...readJsonArray(MINI_PROJECTS_KEY).map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))];
+  return [...readProjects(), ...readPersonalProjects(), ...readJsonArray(MINI_PROJECTS_KEY).map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))];
 }
 
 function readWorkChannels() {
@@ -674,6 +676,22 @@ function taskEditMarkup(task) {
   `;
 }
 
+function promoteReadyPlannerTasks(allTasks, nowKey = dateKey(new Date())) {
+  const byId = new Map(allTasks.map(task => [task.id, task]));
+  let changed = false;
+  const next = allTasks.map(task => {
+    if (task.deleted || task.done || task.automationResolvedAt || !["snooze","incubator"].includes(task.category)) return task;
+    const dependencies = Array.isArray(task.blockedByTaskIds) ? task.blockedByTaskIds.filter(id => id !== task.id) : [];
+    const hasDate = Boolean(task.activateDate), dateReady = !hasDate || task.activateDate <= nowKey;
+    const hasDependencies = dependencies.length > 0, dependenciesReady = !hasDependencies || dependencies.every(id => { const source=byId.get(id); return !source || source.done || source.deleted; });
+    if (!(hasDate || hasDependencies) || !dateReady || !dependenciesReady) return task;
+    const activatedAt = new Date().toISOString(); changed = true;
+    return { ...task, category:task.activateToCategory === "incubator" ? "incubator" : "actionable", activatedAt, automationResolvedAt:activatedAt };
+  });
+  if (changed) { localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(next)); ipcRenderer.send("data-changed"); }
+  return next;
+}
+
 function renderTaskPlanner() {
   const panel = $("taskPlannerPanel");
   $("taskPlannerBtn")?.classList.toggle("active", taskPlannerOpen);
@@ -686,25 +704,33 @@ function renderTaskPlanner() {
   const projects = readTaskProjects().filter(project => !project.archived);
   const projectMap = new Map(projects.map(project => [project.id, project]));
   const sectionMap = new Map(readJsonArray(PROJECT_CHANNELS_KEY).map(section => [section.id, section]));
-  const allItems = readDayTasks().filter(task => !task.deleted && !task.done && projectMap.has(task.projectId)).sort((a, b) => String(a.dueDate || "9999-99-99").localeCompare(String(b.dueDate || "9999-99-99")));
-  const items = allItems.filter(task => !task.parentTaskId);
+  const taskProjectKey = task => task.projectId || `general:${task.mode || "personal"}`;
+  const promotedTasks = promoteReadyPlannerTasks(readDayTasks());
+  promotedTasks.filter(task=>!task.projectId).forEach(task=>{const key=taskProjectKey(task);if(!projectMap.has(key))projectMap.set(key,{id:key,title:"Trabajo general",workChannelId:task.mode||"personal",type:"general"});});
+  const allItems = promotedTasks.filter(task => !task.deleted && !task.done && projectMap.has(taskProjectKey(task))).sort((a, b) => String(a.dueDate || "9999-99-99").localeCompare(String(b.dueDate || "9999-99-99")));
+  const subtasksByParent = new Map();
+  allItems.filter(task=>task.parentTaskId).forEach(task=>subtasksByParent.set(task.parentTaskId,[...(subtasksByParent.get(task.parentTaskId)||[]),task]));
+  const topLevelItems = allItems.filter(task => !task.parentTaskId);
+  const items = topLevelItems.filter(task => plannerCategory === "all" || (task.category || "inbox") === plannerCategory);
   const groups = readWorkChannels().map(channel => {
-    const channelTasks = items.filter(task => projectWorkChannel(projectMap.get(task.projectId)) === channel.id);
+    const channelTasks = items.filter(task => projectWorkChannel(projectMap.get(taskProjectKey(task))) === channel.id);
     if (!channelTasks.length) return "";
-    const projectIds = [...new Set(channelTasks.map(task => task.projectId))];
+    const projectIds = [...new Set(channelTasks.map(taskProjectKey))];
     return `<section class="planner-channel"><header><span class="goal-avatar">${goalAvatar(channel)}</span><div><strong>${escapeHtml(channel.name)}</strong><small>${channelTasks.length} pendientes</small></div></header>${projectIds.map(projectId => {
       const project = projectMap.get(projectId), section = sectionMap.get(project.channelId);
-      const projectTasks = channelTasks.filter(task => task.projectId === projectId);
-      return `<div class="planner-project"><div class="planner-project-title"><small>${escapeHtml(project.type === "mini-project" ? "Mini proyectos" : section?.name || "Videos")}</small><strong>${escapeHtml(project.title)}</strong></div>${projectTasks.map(task => {
+      const projectTasks = channelTasks.filter(task => taskProjectKey(task) === projectId);
+      return `<div class="planner-project"><div class="planner-project-title"><small>${escapeHtml(project.type === "mini-project" ? "Mini proyectos" : project.type === "personal-project" ? "Proyectos" : project.type === "general" ? "General" : section?.name || "Videos")}</small><strong>${escapeHtml(project.title)}</strong></div>${projectTasks.map(task => {
         const assigned = assignmentsByTask.get(task.id) || [];
         const due = taskDueInfo(task.dueDate);
-        const subtasks = allItems.filter(item => item.parentTaskId === task.id), expanded = expandedPlannerTaskIds.has(task.id);
+        const subtasks = subtasksByParent.get(task.id) || [], expanded = expandedPlannerTaskIds.has(task.id);
         return `<div class="planner-task-group">${plannerTaskMarkup(task, assigned, due, `<button class="planner-subtask-toggle ${expanded ? "expanded" : ""}" data-toggle-planner-subtasks="${escapeAttr(task.id)}" title="Subtareas">${expanded ? "▾" : "▸"}<small>${subtasks.length || "+"}</small></button>`)}<div class="planner-subtasks ${expanded ? "expanded" : ""}">${subtasks.map(subtask => plannerTaskMarkup(subtask, assignmentsByTask.get(subtask.id) || [], taskDueInfo(subtask.dueDate), "", true)).join("")}<form class="planner-subtask-add" data-calendar-add-subtask="${escapeAttr(task.id)}"><input maxlength="160" placeholder="Agregar subtarea"/><button type="submit">+</button></form></div></div>`;
       }).join("")}</div>`;
     }).join("")}</section>`;
   }).join("");
-  panel.innerHTML = `<div class="side-panel-head"><div class="side-title">Tareas de proyectos</div><button class="side-close" id="closeTaskPlanner" type="button">×</button></div><div class="planner-task-list">${groups || '<div class="planner-empty">No hay tareas pendientes en proyectos activos.</div>'}</div>`;
+  const filters = PLANNER_CATEGORIES.map(category => { const count=category.id==="all"?topLevelItems.length:topLevelItems.filter(task=>(task.category||"inbox")===category.id).length; return `<button class="planner-category-filter ${plannerCategory===category.id?"active":""}" data-planner-category="${category.id}">${category.label}<small>${count}</small></button>`; }).join("");
+  panel.innerHTML = `<div class="side-panel-head"><div class="side-title">Tareas</div><button class="side-close" id="closeTaskPlanner" type="button">×</button></div><div class="planner-category-filters">${filters}</div><div class="planner-task-list">${groups || '<div class="planner-empty">No hay tareas pendientes en esta categoría.</div>'}</div>`;
   $("closeTaskPlanner").addEventListener("click", () => { taskPlannerOpen = false; renderTaskPlanner(); });
+  panel.querySelectorAll("[data-planner-category]").forEach(button => button.addEventListener("click", () => { plannerCategory=button.dataset.plannerCategory; renderTaskPlanner(); }));
   panel.querySelectorAll("[data-assign-task]").forEach(button => button.addEventListener("click", () => openTaskSessionChooser(button.dataset.assignTask)));
   panel.querySelectorAll("[data-complete-task]").forEach(button => button.addEventListener("click", () => completeProjectTask(button.dataset.completeTask)));
   panel.querySelectorAll("[data-toggle-planner-subtasks]").forEach(button => button.addEventListener("click", () => { const id=button.dataset.togglePlannerSubtasks; expandedPlannerTaskIds.has(id) ? expandedPlannerTaskIds.delete(id) : expandedPlannerTaskIds.add(id); renderTaskPlanner(); }));
@@ -713,7 +739,8 @@ function renderTaskPlanner() {
 
 function plannerTaskMarkup(task, assigned, due, toggle = "", isSubtask = false) {
   const worked = Number(task.focusedSecs) > 0 ? ` · ${fmtDuration(task.focusedSecs)} trabajados` : "";
-  return `<article class="planner-task ${isSubtask ? "planner-subtask" : ""} ${due.className}"><button class="planner-check" data-complete-task="${escapeAttr(task.id)}" title="Completar tarea">✓</button>${toggle}<div><strong>${escapeHtml(task.text)}</strong><small>${due.label}${worked}</small>${assigned.length ? `<span class="task-session-chips">${assigned.map(item => `<i>${escapeHtml(relativeSessionLabel(item))}</i>`).join("")}</span>` : ""}</div><button class="tool-btn" data-assign-task="${escapeAttr(task.id)}">+ Sesión</button></article>`;
+  const category = PLANNER_CATEGORIES.find(item=>item.id===(task.category||"inbox"))?.label || "Inbox";
+  return `<article class="planner-task ${isSubtask ? "planner-subtask" : ""} ${due.className}"><button class="planner-check" data-complete-task="${escapeAttr(task.id)}" title="Completar tarea">✓</button>${toggle}<div><strong>${escapeHtml(task.text)}</strong><small>${category} · ${due.label}${worked}</small>${assigned.length ? `<span class="task-session-chips">${assigned.map(item => `<i>${escapeHtml(relativeSessionLabel(item))}</i>`).join("")}</span>` : ""}</div><button class="tool-btn" data-assign-task="${escapeAttr(task.id)}">+ Sesión</button></article>`;
 }
 
 function addCalendarSubtask(event, parentId) {
@@ -747,9 +774,10 @@ function taskDueInfo(value) {
 function openTaskSessionChooser(taskId) {
   const task = readDayTasks().find(item => item.id === taskId); if (!task) return;
   const assignedIds = new Set(assignedSessionsForTask(taskId).map(session => session.id));
-  const sessions = readSessions().filter(session => session.status !== "cancelled" && new Date(session.startAt).getTime() + (Number(session.durationSecs) || 0) * 1000 > Date.now()).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+  const project = readTaskProjects().find(item=>item.id===task.projectId), area = project ? projectWorkChannel(project) : (task.mode || "personal");
+  const sessions = readSessions().filter(session => session.status !== "cancelled" && (assignedIds.has(session.id) || (task.projectId && session.projectId === task.projectId) || (!task.projectId && inferredWorkArea(session) === area))).sort((a,b)=>new Date(b.startAt)-new Date(a.startAt)).slice(0,80);
   const dialog = $("taskSessionDialog");
-  $("taskSessionDialogContent").innerHTML = `<div class="session-dialog-head"><div><span>Asignar tarea</span><h2>${escapeHtml(task.text)}</h2></div><button class="side-close" id="closeTaskSessionDialog" type="button">×</button></div><p class="future-session-help">Podés elegir más de una sesión.</p><div class="task-session-options">${sessions.length ? sessions.map(session => `<label><input type="checkbox" data-session-choice="${escapeAttr(session.id)}" ${assignedIds.has(session.id) ? "checked" : ""}><span><strong>${escapeHtml(relativeSessionLabel(session))} · ${Math.round((session.durationSecs || 0) / 60)} min</strong><small>${escapeHtml(session.projectName || workAreaLabel(inferredWorkArea(session)))}</small></span></label>`).join("") : "<p>No hay sesiones futuras disponibles.</p>"}</div><div class="dialog-actions"><button class="tool-btn primary" id="saveTaskSessions" type="button">Guardar asignaciones</button></div>`;
+  $("taskSessionDialogContent").innerHTML = `<div class="session-dialog-head"><div><span>Asignar y revisar sesiones</span><h2>${escapeHtml(task.text)}</h2></div><button class="side-close" id="closeTaskSessionDialog" type="button">×</button></div><p class="future-session-help">Marcá las sesiones donde se trabajó o se va a trabajar esta tarea.</p><div class="task-session-options">${sessions.length ? sessions.map(session => { const linked=(session.tasks||[]).find(item=>(item.projectTaskId||item.movedFromDayTaskId)===task.id),focus=Number(linked?.focusedSecs)||Number(task.sessionFocus?.[session.id])||0; return `<label><input type="checkbox" data-session-choice="${escapeAttr(session.id)}" ${assignedIds.has(session.id) ? "checked" : ""}><span><strong>${escapeHtml(relativeSessionLabel(session))} · ${Math.round((session.durationSecs || 0) / 60)} min</strong><small>${escapeHtml(session.projectName || workAreaLabel(inferredWorkArea(session)))} · ${fmtDuration(focus)} en la tarea</small></span></label>`; }).join("") : "<p>No hay sesiones disponibles para este canal.</p>"}</div><div class="dialog-actions"><button class="tool-btn primary" id="saveTaskSessions" type="button">Guardar asignaciones</button></div>`;
   $("closeTaskSessionDialog").addEventListener("click", () => dialog.close());
   $("saveTaskSessions").addEventListener("click", () => {
     const chosen = new Set([...dialog.querySelectorAll("[data-session-choice]:checked")].map(input => input.dataset.sessionChoice));
@@ -760,19 +788,16 @@ function openTaskSessionChooser(taskId) {
 
 function setTaskSessionAssignments(taskId, chosenIds) {
   const task = readDayTasks().find(item => item.id === taskId); if (!task) return;
-  const project = readTaskProjects().find(item => item.id === task.projectId), workArea = projectWorkChannel(project);
   const currentSessions = readSessions();
-  const historicalIds = new Set(assignedSessionsForTask(taskId, currentSessions).filter(session => session.status === "done" || new Date(session.startAt).getTime() + (Number(session.durationSecs) || 0) * 1000 <= Date.now()).map(session => session.id));
-  const finalIds = new Set([...historicalIds, ...chosenIds]);
   const sessions = currentSessions.map(session => {
-    if (historicalIds.has(session.id)) return session;
-    let tasks = (session.tasks || []).filter(item => (item.projectTaskId || item.movedFromDayTaskId) !== taskId);
-    if (finalIds.has(session.id)) tasks.push({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, projectTaskId: task.id, movedFromDayTaskId: task.id, text: task.text, notes: task.notes || "", priority: task.priority || "medium", done: false, deleted: false, focusedSecs: Number(task.sessionFocus?.[session.id]) || 0, importedAt: new Date().toISOString() });
-    return finalIds.has(session.id) ? { ...session, tasks, workArea, workAreaName: workAreaLabel(workArea), projectId: project?.id || null, projectName: project?.title || null } : { ...session, tasks };
+    const existing=(session.tasks||[]).find(item=>(item.projectTaskId||item.movedFromDayTaskId)===taskId);
+    const tasks = (session.tasks || []).filter(item => (item.projectTaskId || item.movedFromDayTaskId) !== taskId);
+    if (chosenIds.has(session.id)) tasks.push(existing || { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, projectTaskId: task.id, movedFromDayTaskId: task.id, text: task.text, notes: task.notes || "", priority: task.priority || "medium", category:task.category||"inbox", done: Boolean(task.done), deleted: false, focusedSecs: Number(task.sessionFocus?.[session.id]) || 0, importedAt: new Date().toISOString() });
+    return { ...session, tasks };
   });
   writeSessions(sessions);
-  const sessionFocus = { ...(task.sessionFocus || {}) }; Object.keys(sessionFocus).forEach(id => { if (!finalIds.has(id)) delete sessionFocus[id]; });
-  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(readDayTasks().map(item => item.id === taskId ? { ...item, sessionIds: [...finalIds], sessionCount: finalIds.size, sessionFocus, focusedSecs: Object.values(sessionFocus).reduce((sum, value) => sum + (Number(value) || 0), 0) } : item)));
+  const sessionFocus = { ...(task.sessionFocus || {}) }; Object.keys(sessionFocus).forEach(id => { if (!chosenIds.has(id)) delete sessionFocus[id]; });
+  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(readDayTasks().map(item => item.id === taskId ? { ...item, sessionIds: [...chosenIds], sessionCount: chosenIds.size, sessionFocus, focusedSecs: Object.values(sessionFocus).reduce((sum, value) => sum + (Number(value) || 0), 0) } : item)));
   ipcRenderer.send("session-created"); renderTaskPlanner(); renderCalendar();
 }
 

@@ -19,7 +19,7 @@ const STATUSES = [
 const CATEGORIES = [{ id: "all", label: "Todas" }, { id: "inbox", label: "Inbox" }, { id: "actionable", label: "Accionable" }, { id: "incubator", label: "Incubadora" }, { id: "snooze", label: "Snooze" }];
 
 let mode = localStorage.getItem("justtimer.workArea.v1") || localStorage.getItem("justtimer.taskMode.v1") || "personal";
-let projectId = null, statusFilter = "all", taskCategory = "all", showArchived = false;
+let projectId = null, statusFilter = "all", taskCategory = "actionable", showArchived = false;
 let selectedProjectImage = null, draggedProjectId = null, draggedChannelId = null, draggedTaskId = null;
 let selectedWorkChannelImage = null, editingWorkChannelId = null;
 let renderCache = null;
@@ -212,7 +212,7 @@ function renderLibrary() {
   endRenderCache();
 }
 
-function openProject(id) { projectId = id; taskCategory = "all"; $("libraryView").classList.add("hidden"); $("projectDetail").classList.remove("hidden"); renderDetail(); }
+function openProject(id) { projectId = id; taskCategory = "actionable"; $("libraryView").classList.add("hidden"); $("projectDetail").classList.remove("hidden"); renderDetail(); }
 function closeProject() { projectId = null; $("projectDetail").classList.add("hidden"); $("libraryView").classList.remove("hidden"); renderLibrary(); }
 function renderDetail() {
   beginRenderCache();
@@ -238,13 +238,15 @@ function renderTaskFilters() {
 function renderTasks() {
   const list = $("dayTaskList");
   const projectTasks = tasks().filter(task => !task.deleted && task.projectId === projectId);
+  const subtasksByParent = new Map();
+  projectTasks.filter(task=>task.parentTaskId).forEach(task=>subtasksByParent.set(task.parentTaskId,[...(subtasksByParent.get(task.parentTaskId)||[]),task]));
   const filtered = projectTasks.filter(task => !task.parentTaskId && (taskCategory === "all" || task.category === taskCategory));
   const pending = filtered.filter(task => !task.done).sort((a, b) => (a.order ?? 999999) - (b.order ?? 999999) || new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
   const completed = filtered.filter(task => task.done).sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0));
   list.innerHTML = "";
   if (!filtered.length) { list.innerHTML = '<div class="todo-empty"><span>✓</span><strong>Todo despejado</strong><p>Agregá la próxima acción para este proyecto.</p></div>'; return; }
   const appendTask = task => {
-    const subtasks = projectTasks.filter(item => item.parentTaskId === task.id).sort((a,b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)), expanded = expandedTaskIds.has(task.id);
+    const subtasks = (subtasksByParent.get(task.id) || []).sort((a,b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)), expanded = expandedTaskIds.has(task.id);
     const row = document.createElement("article"); row.className = `todo-row ${task.done ? "done" : ""} priority-${task.priority || "medium"}`; row.dataset.taskId = task.id; row.draggable = !task.done;
     const due = task.dueDate ? ` · <b class="${isOverdue(task) ? "overdue" : ""}">${taskDateLabel(task.dueDate)}</b>` : "";
     const sessionCount = new Set(task.sessionIds || []).size || Number(task.sessionCount) || 0;
@@ -310,7 +312,32 @@ function taskDateLabel(date) {
   return due.toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 }
 function isOverdue(task) { return task.dueDate && !task.done && new Date(task.dueDate + "T23:59:59") < new Date(); }
-function updateTask(id, patch) { const updated=tasks().map(task => task.id === id ? { ...task, ...patch } : task), promoted=promoteReadyTasks(updated); writeArray(DAY_TASKS_KEY, promoted.tasks); renderDetail(); }
+function linkedTaskId(task) { return task.projectTaskId || task.movedFromDayTaskId || null; }
+function updateTask(id, patch) {
+  const updated=tasks().map(task => task.id === id ? { ...task, ...patch, updatedAt:new Date().toISOString() } : task), promoted=promoteReadyTasks(updated);
+  localStorage.setItem(DAY_TASKS_KEY, JSON.stringify(promoted.tasks));
+  const source=promoted.tasks.find(task=>task.id===id), syncList=list=>(list||[]).map(task=>linkedTaskId(task)===id&&source?{...task,text:source.text,notes:source.notes||"",priority:source.priority||"medium",category:source.category||"inbox",done:Boolean(source.done),completedAt:source.completedAt||null}:task);
+  localStorage.setItem(TASKS_KEY,JSON.stringify(syncList(readArray(TASKS_KEY))));
+  localStorage.setItem(SESSIONS_KEY,JSON.stringify(readArray(SESSIONS_KEY).map(session=>({...session,tasks:syncList(session.tasks)}))));
+  ipcRenderer.send("data-changed"); ipcRenderer.send("session-created"); renderDetail();
+}
+
+function setTaskSessionAssignments(taskId, selectedIds) {
+  const task=readArray(DAY_TASKS_KEY).find(item=>item.id===taskId); if(!task)return;
+  const sessionFocus={...(task.sessionFocus||{})}, nowIso=new Date().toISOString();
+  const nextSessions=readArray(SESSIONS_KEY).map(session=>{
+    const existing=(session.tasks||[]).find(item=>linkedTaskId(item)===taskId), rest=(session.tasks||[]).filter(item=>linkedTaskId(item)!==taskId);
+    if(selectedIds.has(session.id)) rest.push(existing||{id:uid(),projectTaskId:task.id,movedFromDayTaskId:task.id,text:task.text,notes:task.notes||"",priority:task.priority||"medium",category:task.category||"inbox",done:Boolean(task.done),deleted:false,focusedSecs:Number(sessionFocus[session.id])||0,importedAt:nowIso});
+    else delete sessionFocus[session.id];
+    return {...session,tasks:rest};
+  });
+  const focusedSecs=Object.values(sessionFocus).reduce((sum,value)=>sum+(Number(value)||0),0);
+  localStorage.setItem(SESSIONS_KEY,JSON.stringify(nextSessions));
+  localStorage.setItem(DAY_TASKS_KEY,JSON.stringify(readArray(DAY_TASKS_KEY).map(item=>item.id===taskId?{...item,sessionIds:[...selectedIds],sessionCount:selectedIds.size,sessionFocus,focusedSecs}:item)));
+  const running=activeSession(), activeRecord=running?.sessionId?nextSessions.find(session=>session.id===running.sessionId):null;
+  if(activeRecord)localStorage.setItem(TASKS_KEY,JSON.stringify(activeRecord.tasks||[]));
+  ipcRenderer.send("data-changed"); ipcRenderer.send("session-created"); renderDetail();
+}
 function reorderTask(sourceId, targetId) {
   if (!sourceId || !targetId || sourceId === targetId) return;
   const all = tasks(), topLevel = all.filter(task => !task.deleted && !task.parentTaskId && task.projectId === projectId && !task.done).sort((a,b)=>(a.order ?? 999999)-(b.order ?? 999999) || new Date(a.createdAt||0)-new Date(b.createdAt||0));
@@ -334,7 +361,7 @@ function editTask(task) {
   const allTasks=tasks(), byId=new Map(allTasks.map(item=>[item.id,item]));
   const dependsOn=(sourceId,targetId,seen=new Set())=>{if(sourceId===targetId)return true;if(seen.has(sourceId))return false;seen.add(sourceId);return (byId.get(sourceId)?.blockedByTaskIds||[]).some(id=>dependsOn(id,targetId,seen));};
   const dependencyOptions=allTasks.filter(item=>!item.deleted&&item.id!==task.id&&item.projectId===task.projectId&&!dependsOn(item.id,task.id)).map(item=>({id:item.id,text:item.text,done:Boolean(item.done)}));
-  openProjectEditor({ eyebrow:"Tarea", title:"Editar tarea", label:"Descripción", value:task.text, dueDate:task.dueDate || "", category:task.category || "inbox", estimatedSessions:task.estimatedSessions || "", activateDate:task.activateDate||"", activateToCategory:task.activateToCategory||"actionable", blockedByTaskIds:task.blockedByTaskIds||[], dependencyOptions, showDate:true, showCategory:true, showEstimate:true, showAutomation:true, onSave:({ text,dueDate,category,estimatedSessions,activateDate,activateToCategory,blockedByTaskIds }) => { const automationChanged=(task.activateDate||"")!==(activateDate||"") || (task.activateToCategory||"actionable")!==(activateToCategory||"actionable") || JSON.stringify([...(task.blockedByTaskIds||[])].sort())!==JSON.stringify([...blockedByTaskIds].sort()); updateTask(task.id, { text, dueDate:dueDate || null, category:category || "inbox", estimatedSessions:estimatedSessions > 0 ? estimatedSessions : null, activateDate:activateDate||null, activateToCategory:activateToCategory||"actionable", blockedByTaskIds, automationResolvedAt:automationChanged?null:task.automationResolvedAt||null, editedAt:new Date().toISOString() }); } });
+  openProjectEditor({ eyebrow:"Tarea", title:"Detalle de tarea", label:"Descripción", value:task.text, dueDate:task.dueDate || "", category:task.category || "inbox", estimatedSessions:task.estimatedSessions || "", activateDate:task.activateDate||"", activateToCategory:task.activateToCategory||"actionable", blockedByTaskIds:task.blockedByTaskIds||[], dependencyOptions, sessionTask:task, showDate:true, showCategory:true, showEstimate:true, showAutomation:true, onSave:({ text,dueDate,category,estimatedSessions,activateDate,activateToCategory,blockedByTaskIds,selectedSessionIds }) => { const automationChanged=(task.activateDate||"")!==(activateDate||"") || (task.activateToCategory||"actionable")!==(activateToCategory||"actionable") || JSON.stringify([...(task.blockedByTaskIds||[])].sort())!==JSON.stringify([...blockedByTaskIds].sort()); updateTask(task.id, { text, dueDate:dueDate || null, category:category || "inbox", estimatedSessions:estimatedSessions > 0 ? estimatedSessions : null, activateDate:activateDate||null, activateToCategory:activateToCategory||"actionable", blockedByTaskIds, automationResolvedAt:automationChanged?null:task.automationResolvedAt||null, editedAt:new Date().toISOString() }); if(selectedSessionIds)setTaskSessionAssignments(task.id,new Set(selectedSessionIds)); } });
 }
 
 function activeSession() { try { return JSON.parse(localStorage.getItem(ACTIVE_SESSION_KEY) || "null"); } catch { return null; } }
@@ -464,12 +491,18 @@ function renameChannel(id) {
   const channel = channels().find(item => item.id === id); if (!channel) return;
   openProjectEditor({ eyebrow:"Sección", title:"Editar sección", label:"Nombre", value:channel.name, onSave:({text}) => { writeArray(CHANNELS_KEY, channels().map(item => item.id === id ? { ...item, name:text } : item)); renderLibrary(); } });
 }
-function openProjectEditor({ eyebrow="Editar", title="Editar", label="Nombre", value="", dueDate="", category="inbox", estimatedSessions="", activateDate="", activateToCategory="actionable", blockedByTaskIds=[], dependencyOptions=[], showDate=false, showCategory=false, showEstimate=false, showAutomation=false, onSave }) {
+function openProjectEditor({ eyebrow="Editar", title="Editar", label="Nombre", value="", dueDate="", category="inbox", estimatedSessions="", activateDate="", activateToCategory="actionable", blockedByTaskIds=[], dependencyOptions=[], sessionTask=null, showDate=false, showCategory=false, showEstimate=false, showAutomation=false, onSave }) {
   pendingEditorSave = onSave;
   $("projectEditEyebrow").textContent = eyebrow; $("projectEditTitle").textContent = title; $("projectEditTextLabel").firstChild.textContent = label;
   $("projectEditText").value = value; $("projectEditDate").value = dueDate; $("projectEditDateRow").classList.toggle("hidden", !showDate); $("projectEditCategory").value = category; $("projectEditCategoryRow").classList.toggle("hidden", !showCategory); $("projectEditEstimate").value = estimatedSessions; $("projectEditEstimateRow").classList.toggle("hidden", !showEstimate);
   $("projectEditActivateDate").value=activateDate; $("projectEditActivateTo").value=activateToCategory; $("projectEditAutomationRows").classList.toggle("hidden",!showAutomation); $("projectEditDependenciesRow").classList.toggle("hidden",!showAutomation);
   const selectedDependencies=new Set(blockedByTaskIds); $("projectEditDependencies").innerHTML=dependencyOptions.length?`<div class="task-dependency-options">${dependencyOptions.map(item=>`<label><input type="checkbox" value="${esc(item.id)}" ${selectedDependencies.has(item.id)?"checked":""}><span>${item.done?"✓ ":""}${esc(item.text)}</span></label>`).join("")}</div>`:"<p>No hay otras tareas en este proyecto.</p>";
+  $("projectEditSessionsRow").classList.toggle("hidden",!sessionTask);
+  if(sessionTask){
+    const assigned=new Set(readArray(SESSIONS_KEY).filter(session=>(session.tasks||[]).some(item=>linkedTaskId(item)===sessionTask.id)).map(session=>session.id));
+    const candidates=readArray(SESSIONS_KEY).filter(session=>session.status!=="cancelled"&&(assigned.has(session.id)||(sessionTask.projectId&&session.projectId===sessionTask.projectId)||(!sessionTask.projectId&&(session.workArea||"personal")===(sessionTask.mode||"personal")))).sort((a,b)=>new Date(b.startAt)-new Date(a.startAt)).slice(0,80);
+    $("projectEditSessions").innerHTML=candidates.length?candidates.map(session=>{const linked=(session.tasks||[]).find(item=>linkedTaskId(item)===sessionTask.id),focus=Number(linked?.focusedSecs)||Number(sessionTask.sessionFocus?.[session.id])||0,date=new Date(session.startAt),status=session.status==="done"?"Terminada":session.status==="running"?"En curso":"Planificada";return `<label><input type="checkbox" value="${esc(session.id)}" ${assigned.has(session.id)?"checked":""}><span><strong>${date.toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit"})} · ${date.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</strong><small>${status} · ${formatTaskDuration(focus)} en esta tarea</small></span></label>`;}).join(""):"<p>No hay sesiones disponibles para este proyecto.</p>";
+  }
   $("projectEditDialog").showModal(); requestAnimationFrame(() => { $("projectEditText").focus(); $("projectEditText").select(); });
 }
 function closeProjectEditor() { pendingEditorSave = null; $("projectEditDialog").close(); }
@@ -499,7 +532,7 @@ $("moveProjectWorkChannel").addEventListener("change", event => fillMoveProjectS
 $("moveProjectClose").addEventListener("click", closeMoveProjectDialog);
 $("moveProjectCancel").addEventListener("click", closeMoveProjectDialog);
 $("moveProjectForm").addEventListener("submit", event => { event.preventDefault(); if (movingProjectId) moveProjectAcrossChannels(movingProjectId, $("moveProjectWorkChannel").value, $("moveProjectSection").value); });
-$("projectEditForm").addEventListener("submit", event => { event.preventDefault(); const text = $("projectEditText").value.trim(); if (!text || !pendingEditorSave) return; const save = pendingEditorSave, dueDate = $("projectEditDateRow").classList.contains("hidden") ? "" : $("projectEditDate").value, category = $("projectEditCategoryRow").classList.contains("hidden") ? null : $("projectEditCategory").value, estimatedSessions = $("projectEditEstimateRow").classList.contains("hidden") ? null : Math.max(0, Math.round(Number($("projectEditEstimate").value) || 0)), activateDate=$("projectEditAutomationRows").classList.contains("hidden")?null:$("projectEditActivateDate").value, activateToCategory=$("projectEditAutomationRows").classList.contains("hidden")?null:$("projectEditActivateTo").value, blockedByTaskIds=$("projectEditDependenciesRow").classList.contains("hidden")?[]:[...$("projectEditDependencies").querySelectorAll("input:checked")].map(input=>input.value); pendingEditorSave = null; $("projectEditDialog").close(); save({ text, dueDate, category, estimatedSessions, activateDate, activateToCategory, blockedByTaskIds }); });
+$("projectEditForm").addEventListener("submit", event => { event.preventDefault(); const text = $("projectEditText").value.trim(); if (!text || !pendingEditorSave) return; const save = pendingEditorSave, dueDate = $("projectEditDateRow").classList.contains("hidden") ? "" : $("projectEditDate").value, category = $("projectEditCategoryRow").classList.contains("hidden") ? null : $("projectEditCategory").value, estimatedSessions = $("projectEditEstimateRow").classList.contains("hidden") ? null : Math.max(0, Math.round(Number($("projectEditEstimate").value) || 0)), activateDate=$("projectEditAutomationRows").classList.contains("hidden")?null:$("projectEditActivateDate").value, activateToCategory=$("projectEditAutomationRows").classList.contains("hidden")?null:$("projectEditActivateTo").value, blockedByTaskIds=$("projectEditDependenciesRow").classList.contains("hidden")?[]:[...$("projectEditDependencies").querySelectorAll("input:checked")].map(input=>input.value), selectedSessionIds=$("projectEditSessionsRow").classList.contains("hidden")?null:[...$("projectEditSessions").querySelectorAll("input:checked")].map(input=>input.value); pendingEditorSave = null; $("projectEditDialog").close(); save({ text, dueDate, category, estimatedSessions, activateDate, activateToCategory, blockedByTaskIds, selectedSessionIds }); });
 $("projectEditClose").addEventListener("click", closeProjectEditor);
 $("projectEditCancel").addEventListener("click", closeProjectEditor);
 $("channelForm").addEventListener("submit", event => {
