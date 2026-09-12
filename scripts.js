@@ -778,7 +778,7 @@ function getPendingSessions() {
 
 function updateSessionSummary(pending = getPendingSessions()) {
   const today = new Date();
-  const todayCount = pending.filter(session => isSameDay(new Date(session.startAt), today)).length;
+  const todayCount = pending.filter(session => (session.workArea || "personal") !== "routine" && session.workAreaName !== "Personal" && isSameDay(new Date(session.startAt), today)).length;
   $("sessionSummary").textContent = todayCount === 1
     ? "Tienes 1 sesion hoy"
     : todayCount > 1
@@ -1446,7 +1446,7 @@ $("closeBtn").addEventListener("click", () => {
   let habits = [], logs = {};
   try { habits = JSON.parse(localStorage.getItem("justtimer.habits.v1") || "[]"); logs = JSON.parse(localStorage.getItem("justtimer.habitLogs.v1") || "{}"); } catch {}
   const pending = habits.filter(habit => !habit.archived && (!habit.days?.length || habit.days.includes(day))).filter(habit => { const log = logs[`${habit.id}:${key}`] || {}; return !(log.justified || Number(log.count) >= Math.max(1, Number(habit.targetCount) || 1)); }).map(habit => `• ${habit.name}`);
-  const sessions = readSessions().filter(session => isSameDay(new Date(session.startAt), today) && session.status === "done");
+  const sessions = readSessions().filter(session => (session.workArea || "personal") !== "routine" && session.workAreaName !== "Personal" && isSameDay(new Date(session.startAt), today) && session.status === "done");
   const dayTasks = readProjectTasks();
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowItems = readDailyPriorities()[todayKey(tomorrow)] || [];

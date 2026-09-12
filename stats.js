@@ -25,10 +25,16 @@ function readWorkChannels() {
   return channels;
 }
 
+function sessionChannelId(session) {
+  if (session.workArea) return session.workArea;
+  const project = readProjects().find(item => item.id === session.projectId);
+  return project?.workChannelId || project?.mode || "personal";
+}
+
 function completedSessions() {
   return readSessions().filter(session => {
     const start = new Date(session.startAt);
-    return session.status === "done" && !Number.isNaN(start.getTime());
+    return session.status === "done" && sessionChannelId(session) !== "routine" && session.workAreaName !== "Personal" && !Number.isNaN(start.getTime());
   }).sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
 }
 

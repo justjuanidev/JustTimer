@@ -3,6 +3,7 @@ const { ipcRenderer } = require("electron");
 const SESSIONS_KEY = "justtimer.sessions.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
+const MINI_PROJECTS_KEY = "justtimer.miniProjects.v1";
 const WORK_CHANNELS_KEY = "justtimer.workChannels.v1";
 const PROJECT_CHANNELS_KEY = "justtimer.projectChannels.v1";
 const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
@@ -64,7 +65,7 @@ function planForWeek(date) { return readWeeklyPlans()[weekKey(date)] || null; }
 function completedSessionsInRange(start, end, sessions = readSessions()) {
   return sessions.filter(session => {
     const at = new Date(session.startAt);
-    return session.status === "done" && !Number.isNaN(at.getTime()) && at >= start && at < end;
+    return session.status === "done" && inferredWorkArea(session) !== "routine" && session.workAreaName !== "Personal" && !Number.isNaN(at.getTime()) && at >= start && at < end;
   });
 }
 
@@ -222,6 +223,10 @@ async function refreshGoogleStatus() {
 
 function readProjects() {
   return readJsonArray(PROJECTS_KEY);
+}
+
+function readTaskProjects() {
+  return [...readProjects(), ...readJsonArray(MINI_PROJECTS_KEY).map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))];
 }
 
 function readWorkChannels() {
@@ -643,7 +648,7 @@ function renderTaskPlanner() {
   const sessions = readSessions(), assignmentsByTask = new Map();
   sessions.filter(session => session.status !== "cancelled").forEach(session => (session.tasks || []).forEach(task => { const id = task.projectTaskId || task.movedFromDayTaskId; if (!id) return; if (!assignmentsByTask.has(id)) assignmentsByTask.set(id, []); assignmentsByTask.get(id).push(session); }));
   assignmentsByTask.forEach(items => items.sort((a,b) => new Date(a.startAt)-new Date(b.startAt)));
-  const projects = readProjects().filter(project => !project.archived);
+  const projects = readTaskProjects().filter(project => !project.archived);
   const projectMap = new Map(projects.map(project => [project.id, project]));
   const sectionMap = new Map(readJsonArray(PROJECT_CHANNELS_KEY).map(section => [section.id, section]));
   const allItems = readDayTasks().filter(task => !task.deleted && !task.done && projectMap.has(task.projectId)).sort((a, b) => String(a.dueDate || "9999-99-99").localeCompare(String(b.dueDate || "9999-99-99")));
@@ -655,7 +660,7 @@ function renderTaskPlanner() {
     return `<section class="planner-channel"><header><span class="goal-avatar">${goalAvatar(channel)}</span><div><strong>${escapeHtml(channel.name)}</strong><small>${channelTasks.length} pendientes</small></div></header>${projectIds.map(projectId => {
       const project = projectMap.get(projectId), section = sectionMap.get(project.channelId);
       const projectTasks = channelTasks.filter(task => task.projectId === projectId);
-      return `<div class="planner-project"><div class="planner-project-title"><small>${escapeHtml(section?.name || "Videos")}</small><strong>${escapeHtml(project.title)}</strong></div>${projectTasks.map(task => {
+      return `<div class="planner-project"><div class="planner-project-title"><small>${escapeHtml(project.type === "mini-project" ? "Mini proyectos" : section?.name || "Videos")}</small><strong>${escapeHtml(project.title)}</strong></div>${projectTasks.map(task => {
         const assigned = assignmentsByTask.get(task.id) || [];
         const due = taskDueInfo(task.dueDate);
         const subtasks = allItems.filter(item => item.parentTaskId === task.id), expanded = expandedPlannerTaskIds.has(task.id);
@@ -678,7 +683,7 @@ function plannerTaskMarkup(task, assigned, due, toggle = "", isSubtask = false) 
 
 function addCalendarSubtask(event, parentId) {
   event.preventDefault(); const input=event.currentTarget.querySelector("input"), text=input.value.trim(), parent=readDayTasks().find(task=>task.id===parentId); if(!text||!parent)return;
-  const all=readDayTasks(); all.push({ id:`${Date.now()}-${Math.random().toString(16).slice(2)}`, parentTaskId:parent.id, text, done:false, notes:"", priority:parent.priority||"medium", deleted:false, category:parent.category||"inbox", dueDate:parent.dueDate||null, mode:projectWorkChannel(readProjects().find(project=>project.id===parent.projectId)), projectId:parent.projectId, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() });
+  const all=readDayTasks(); all.push({ id:`${Date.now()}-${Math.random().toString(16).slice(2)}`, parentTaskId:parent.id, text, done:false, notes:"", priority:parent.priority||"medium", deleted:false, category:parent.category||"inbox", dueDate:parent.dueDate||null, mode:projectWorkChannel(readTaskProjects().find(project=>project.id===parent.projectId)), projectId:parent.projectId, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() });
   localStorage.setItem(DAY_TASKS_KEY,JSON.stringify(all)); expandedPlannerTaskIds.add(parentId); ipcRenderer.send("data-changed"); renderTaskPlanner();
 }
 
@@ -720,7 +725,7 @@ function openTaskSessionChooser(taskId) {
 
 function setTaskSessionAssignments(taskId, chosenIds) {
   const task = readDayTasks().find(item => item.id === taskId); if (!task) return;
-  const project = readProjects().find(item => item.id === task.projectId), workArea = projectWorkChannel(project);
+  const project = readTaskProjects().find(item => item.id === task.projectId), workArea = projectWorkChannel(project);
   const currentSessions = readSessions();
   const historicalIds = new Set(assignedSessionsForTask(taskId, currentSessions).filter(session => session.status === "done" || new Date(session.startAt).getTime() + (Number(session.durationSecs) || 0) * 1000 <= Date.now()).map(session => session.id));
   const finalIds = new Set([...historicalIds, ...chosenIds]);

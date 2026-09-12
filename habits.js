@@ -2,6 +2,9 @@ const { ipcRenderer } = require("electron");
 
 const HABITS_KEY = "justtimer.habits.v1";
 const HABIT_LOGS_KEY = "justtimer.habitLogs.v1";
+const MINI_PROJECTS_KEY = "justtimer.miniProjects.v1";
+const MINI_PROJECT_LOGS_KEY = "justtimer.miniProjectSessions.v1";
+const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const DAY_NAMES = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const PHASES = {
   morning: { label: "Manana", greeting: "Buenos dias", range: "04:00 - 12:00", start: 4, end: 12 },
@@ -17,6 +20,8 @@ const REMINDER_PRESETS = {
 let selectedHabitId = null;
 let pendingLog = null;
 let editingHabitId = null;
+let personalMode = "habits";
+let selectedMiniProjectId = null;
 
 function $(id) {
   return document.getElementById(id);
@@ -473,7 +478,126 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function miniProjects() {
+  const value = readJson(MINI_PROJECTS_KEY, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function miniProjectLogs() {
+  const value = readJson(MINI_PROJECT_LOGS_KEY, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function personalTasks() {
+  const value = readJson(DAY_TASKS_KEY, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function freshId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+
+function miniProjectStats(projectId) {
+  const rows = miniProjectLogs().filter(row => row.projectId === projectId);
+  const tasks = personalTasks().filter(task => !task.deleted && task.projectId === projectId);
+  const seconds = rows.reduce((sum, row) => sum + (Number(row.durationSecs) || 0), 0);
+  return { sessions:rows.length, seconds, tasks:tasks.length, pending:tasks.filter(task => !task.done).length };
+}
+
+function shortDuration(seconds) {
+  const minutes = Math.floor(Math.max(0, Number(seconds) || 0) / 60), hours = Math.floor(minutes / 60);
+  return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+}
+
+function setPersonalMode(nextMode) {
+  personalMode = nextMode;
+  const isHabits = nextMode === "habits";
+  $("habitsModeBtn").classList.toggle("active", isHabits);
+  $("projectsModeBtn").classList.toggle("active", !isHabits);
+  $("habitsView").classList.toggle("hidden", !isHabits);
+  $("projectsView").classList.toggle("hidden", isHabits);
+  $("habitDetail").classList.add("hidden");
+  $("addHabitBtn").classList.toggle("hidden", !isHabits);
+  if (!isHabits) renderMiniProjects();
+}
+
+function renderMiniProjects() {
+  const grid = $("personalProjectGrid");
+  const detail = $("personalProjectDetail");
+  if (selectedMiniProjectId) {
+    const project = miniProjects().find(item => item.id === selectedMiniProjectId && !item.archived);
+    if (project) {
+      grid.classList.add("hidden");
+      detail.classList.remove("hidden");
+      renderMiniProjectDetail(project);
+      return;
+    }
+    selectedMiniProjectId = null;
+  }
+  detail.classList.add("hidden"); grid.classList.remove("hidden"); grid.innerHTML = "";
+  const active = miniProjects().filter(project => !project.archived);
+  active.forEach(project => {
+    const stats = miniProjectStats(project.id), card = document.createElement("button");
+    card.type = "button"; card.className = "personal-project-card";
+    card.innerHTML = `<span class="personal-project-icon">${escapeHtml(project.icon || "🌱")}</span><span class="personal-project-copy"><strong>${escapeHtml(project.name)}</strong><small>${stats.pending} pendientes · ${stats.tasks} tareas · ${stats.sessions} sesiones</small></span><span class="personal-project-time">${shortDuration(stats.seconds)}</span>`;
+    card.addEventListener("click", () => { selectedMiniProjectId = project.id; renderMiniProjects(); });
+    grid.appendChild(card);
+  });
+  if (!active.length) grid.innerHTML = '<div class="habit-empty">Creá tu primer proyecto personal. También aparecerá en los breaks entre sesiones.</div>';
+}
+
+function orderedProjectTasks(projectId) {
+  const all = personalTasks().filter(task => !task.deleted && task.projectId === projectId);
+  const top = all.filter(task => !task.parentTaskId), result = [];
+  top.forEach(parent => { result.push(parent); all.filter(task => task.parentTaskId === parent.id).forEach(child => result.push(child)); });
+  return result;
+}
+
+function writePersonalTasks(value) { writeJson(DAY_TASKS_KEY, value); }
+
+function renderMiniProjectDetail(project) {
+  const stats = miniProjectStats(project.id);
+  $("personalProjectHero").innerHTML = `<div><span class="personal-project-icon large">${escapeHtml(project.icon || "🌱")}</span><div><h2>${escapeHtml(project.name)}</h2><p>${stats.sessions} sesiones · ${shortDuration(stats.seconds)} trabajados · ${stats.pending} pendientes</p></div></div><div class="personal-project-dates"><span>Inicio <b>${escapeHtml(project.startDate || "Sin fecha")}</b></span><span>Límite <b>${escapeHtml(project.dueDate || "Sin fecha")}</b></span></div>`;
+  const list = $("personalTaskList"), rows = orderedProjectTasks(project.id); list.innerHTML = "";
+  rows.forEach(task => {
+    const isSubtask = Boolean(task.parentTaskId), row = document.createElement("article");
+    row.className = `personal-task-row ${isSubtask ? "personal-subtask" : ""} ${task.done ? "done" : ""}`;
+    row.innerHTML = `<button class="personal-task-check" type="button">${task.done ? "✓" : ""}</button><button class="personal-task-copy" type="button"><strong>${isSubtask ? "↳ " : ""}${escapeHtml(task.text)}</strong><small>${isSubtask ? "Subtarea" : "Tarea"}${task.dueDate ? ` · vence ${escapeHtml(task.dueDate)}` : ""}</small></button>${isSubtask ? "" : '<button class="personal-add-subtask" type="button" title="Agregar subtarea">+</button>'}<button class="personal-task-delete" type="button" title="Eliminar">×</button>`;
+    row.querySelector(".personal-task-check").addEventListener("click", () => { const at = new Date().toISOString(); writePersonalTasks(personalTasks().map(item => item.id === task.id ? { ...item, done:!task.done, completedAt:!task.done ? at : null } : item)); renderMiniProjectDetail(project); });
+    row.querySelector(".personal-task-copy").addEventListener("click", () => { const text = window.prompt("Editar tarea", task.text); if (text?.trim()) { writePersonalTasks(personalTasks().map(item => item.id === task.id ? { ...item, text:text.trim(), updatedAt:new Date().toISOString() } : item)); renderMiniProjectDetail(project); } });
+    row.querySelector(".personal-add-subtask")?.addEventListener("click", () => addPersonalSubtask(project, task));
+    row.querySelector(".personal-task-delete").addEventListener("click", () => { const ids = new Set([task.id]); personalTasks().filter(item => item.parentTaskId === task.id).forEach(item => ids.add(item.id)); writePersonalTasks(personalTasks().map(item => ids.has(item.id) ? { ...item, deleted:true, deletedAt:new Date().toISOString() } : item)); renderMiniProjectDetail(project); });
+    list.appendChild(row);
+  });
+  if (!rows.length) list.innerHTML = '<div class="habit-empty">Todavía no hay tareas en este proyecto.</div>';
+}
+
+function addPersonalSubtask(project, parent) {
+  const text = window.prompt("Nueva subtarea"); if (!text?.trim()) return;
+  const now = new Date().toISOString();
+  writePersonalTasks([...personalTasks(), { id:freshId(), parentTaskId:parent.id, text:text.trim(), done:false, deleted:false, priority:parent.priority || "medium", category:"inbox", dueDate:parent.dueDate || null, mode:"routine", projectId:project.id, focusedSecs:0, sessionIds:[], createdAt:now }]);
+  renderMiniProjectDetail(project);
+}
+
+function saveMiniProject(event) {
+  event.preventDefault();
+  const name = $("miniProjectName").value.trim(), startDate = $("miniProjectStartDate").value || null, dueDate = $("miniProjectDueDate").value || null;
+  if (!name) return;
+  if (startDate && dueDate && startDate > dueDate) { alert("La fecha de inicio no puede ser posterior a la fecha límite."); return; }
+  writeJson(MINI_PROJECTS_KEY, [...miniProjects(), { id:freshId(), name, icon:"🌱", minMinutes:Math.max(1, Number($("miniProjectMin").value) || 10), startDate, dueDate, createdAt:new Date().toISOString() }]);
+  $("miniProjectForm").reset(); $("miniProjectMin").value = "10"; $("miniProjectDialog").close(); renderMiniProjects();
+}
+
 $("addHabitBtn").addEventListener("click", () => openHabitForm());
+$("habitsModeBtn").addEventListener("click", () => setPersonalMode("habits"));
+$("projectsModeBtn").addEventListener("click", () => setPersonalMode("projects"));
+$("addMiniProjectBtn").addEventListener("click", () => $("miniProjectDialog").showModal());
+$("cancelMiniProjectBtn").addEventListener("click", () => $("miniProjectDialog").close());
+$("miniProjectForm").addEventListener("submit", saveMiniProject);
+$("backToMiniProjects").addEventListener("click", () => { selectedMiniProjectId = null; renderMiniProjects(); });
+$("personalTaskForm").addEventListener("submit", event => {
+  event.preventDefault(); const project = miniProjects().find(item => item.id === selectedMiniProjectId), text = $("personalTaskName").value.trim(); if (!project || !text) return;
+  writePersonalTasks([...personalTasks(), { id:freshId(), text, done:false, deleted:false, priority:"medium", category:"inbox", dueDate:$("personalTaskDue").value || null, mode:"routine", projectId:project.id, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() }]);
+  $("personalTaskName").value = ""; $("personalTaskDue").value = ""; renderMiniProjectDetail(project);
+});
 $("habitForm").addEventListener("submit", saveHabit);
 $("cancelHabitFormBtn").addEventListener("click", () => { editingHabitId = null; $("habitFormDialog").close(); });
 $("habitLogForm").addEventListener("submit", event => {
@@ -492,6 +616,9 @@ $("habitKindSelect").addEventListener("change", event => {
 $("habitPhaseSelect").addEventListener("change", renderReminderPresets);
 $("habitReminderTimes").addEventListener("input", renderReminderPresets);
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
+window.addEventListener("storage", event => {
+  if (personalMode === "projects" && [MINI_PROJECTS_KEY, MINI_PROJECT_LOGS_KEY, DAY_TASKS_KEY].includes(event.key)) renderMiniProjects();
+});
 
 render();
 setInterval(render, 60_000);

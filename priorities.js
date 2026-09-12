@@ -1,5 +1,5 @@
 const { ipcRenderer } = require("electron");
-const TASKS_KEY = "justtimer.dayTasks.v1", PROJECTS_KEY = "justtimer.projects.v1", CHANNELS_KEY = "justtimer.workChannels.v1", PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
+const TASKS_KEY = "justtimer.dayTasks.v1", PROJECTS_KEY = "justtimer.projects.v1", MINI_PROJECTS_KEY = "justtimer.miniProjects.v1", CHANNELS_KEY = "justtimer.workChannels.v1", PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 const $ = id => document.getElementById(id);
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch { return fallback; } };
 const write = (key, value) => { localStorage.setItem(key, JSON.stringify(value)); ipcRenderer.send("data-changed"); };
@@ -7,14 +7,17 @@ const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getM
 const targetDate = localStorage.getItem("justtimer.priorityTargetDate.v1") || dateKey();
 let selectedSlot = 1;
 let plan = [];
+let selectedProjectId = null;
 
 function uid() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function tasks() { const value = read(TASKS_KEY, []); return Array.isArray(value) ? value : []; }
-function projects() { return read(PROJECTS_KEY, []); }
+function videoProjects() { const value = read(PROJECTS_KEY, []); return Array.isArray(value) ? value : []; }
+function miniProjects() { const value = read(MINI_PROJECTS_KEY, []); return Array.isArray(value) ? value : []; }
+function projects() { return [...videoProjects(), ...miniProjects().map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))]; }
 function channels() { return read(CHANNELS_KEY, []); }
 function projectFor(task) { return projects().find(project => project.id === task.projectId); }
 function channelId(task) { const project = projectFor(task); return project?.workChannelId || project?.mode || task.mode || "personal"; }
-function channelName(task) { const id = channelId(task); return channels().find(channel => channel.id === id)?.name || (id === "work" ? "Laburo" : "JustJuani"); }
+function channelName(task) { const id = channelId(task); return channels().find(channel => channel.id === id)?.name || (id === "routine" ? "Personal" : id === "work" ? "Laburo" : "JustJuani"); }
 function esc(value) { return String(value || "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
 
 function loadPlan() {
@@ -78,9 +81,25 @@ function taskScore(task) {
 }
 
 function renderResults() {
-  const q = $("searchInput").value.trim().toLowerCase(), filter = $("channelFilter").value, chosen = new Set(plan.map(item=>item.taskId).filter(Boolean));
-  const list = tasks().filter(task => !task.deleted && !task.done && (!q || `${task.text} ${channelName(task)} ${projectFor(task)?.title || ""}`.toLowerCase().includes(q)) && (filter === "all" || channelId(task) === filter)).sort((a,b)=>taskScore(b)-taskScore(a));
-  $("taskResults").innerHTML = list.length ? list.slice(0,80).map(task => `<button class="priority-result ${chosen.has(task.id)?"chosen":""}" data-id="${esc(task.id)}"><span><strong>${esc(task.text)}</strong><small>${esc(channelName(task))} · ${esc(projectFor(task)?.title || "Sin proyecto")}${task.dueDate ? ` · ${task.dueDate}` : ""}</small></span><b>${task.priority === "high" ? "Urgente" : chosen.has(task.id) ? "Elegida" : "+"}</b></button>`).join("") : '<p class="priority-empty">No encontramos tareas con ese filtro.</p>';
+  const q = $("searchInput").value.trim().toLowerCase(), filter = $("channelFilter").value, chosen = new Set(plan.map(item=>item.taskId).filter(Boolean)), browser = $("priorityProjectBrowser"), results = $("taskResults");
+  if (!selectedProjectId) {
+    results.innerHTML = "";
+    const availableTasks = tasks().filter(task => !task.deleted && !task.done && (filter === "all" || channelId(task) === filter));
+    const projectRows = projects().filter(project => !project.archived && (filter === "all" || (project.workChannelId || project.mode || "personal") === filter)).map(project => ({ project, count:availableTasks.filter(task => task.projectId === project.id).length }));
+    const unassignedChannels = [...new Set(availableTasks.filter(task => !task.projectId).map(channelId))].map(id => ({ project:{ id:`__unassigned__:${id}`, title:id === "routine" ? "Personal sin proyecto" : "Tareas generales", workChannelId:id, type:"unassigned" }, count:availableTasks.filter(task => !task.projectId && channelId(task) === id).length }));
+    const rows = [...projectRows, ...unassignedChannels].filter(row => !q || row.project.title.toLowerCase().includes(q));
+    browser.innerHTML = rows.length ? rows.map(({ project, count }) => `<button class="priority-project-choice" data-project="${esc(project.id)}"><span>${project.type === "mini-project" ? esc(project.icon || "🌱") : project.type === "unassigned" ? "•" : "▶"}</span><span><strong>${esc(project.title)}</strong><small>${esc(channels().find(c=>c.id===(project.workChannelId||project.mode))?.name || (project.workChannelId === "routine" ? "Personal" : "Canal"))} · ${count} tareas pendientes</small></span><b>→</b></button>`).join("") : '<p class="priority-empty">No hay proyectos en este filtro.</p>';
+    browser.querySelectorAll("[data-project]").forEach(button => button.addEventListener("click", () => { selectedProjectId = button.dataset.project; $("searchInput").value = ""; renderResults(); }));
+    return;
+  }
+  const isUnassigned = selectedProjectId.startsWith("__unassigned__:"), unassignedChannel = isUnassigned ? selectedProjectId.split(":")[1] : null, project = projects().find(item => item.id === selectedProjectId);
+  const projectTitle = isUnassigned ? (unassignedChannel === "routine" ? "Personal sin proyecto" : "Tareas generales") : project?.title || "Proyecto";
+  browser.innerHTML = `<div class="priority-project-selected"><button id="backToPriorityProjects" type="button">← Proyectos</button><strong>${esc(projectTitle)}</strong></div>`;
+  $("backToPriorityProjects").addEventListener("click", () => { selectedProjectId = null; renderResults(); });
+  const list = tasks().filter(task => !task.deleted && !task.done && (isUnassigned ? !task.projectId && channelId(task) === unassignedChannel : task.projectId === selectedProjectId) && (!q || task.text.toLowerCase().includes(q))).sort((a,b) => taskScore(b)-taskScore(a));
+  const ids = new Set(list.map(task => task.id)), ordered = [];
+  list.filter(task => !task.parentTaskId || !ids.has(task.parentTaskId)).forEach(parent => { ordered.push(parent); list.filter(child => child.parentTaskId === parent.id).forEach(child => ordered.push(child)); });
+  results.innerHTML = ordered.length ? ordered.map(task => `<button class="priority-result ${task.parentTaskId?"priority-subtask":""} ${chosen.has(task.id)?"chosen":""}" data-id="${esc(task.id)}"><span><strong>${task.parentTaskId?"↳ ":""}${esc(task.text)}</strong><small>${task.parentTaskId?"Subtarea · ":""}${task.dueDate ? `vence ${task.dueDate}` : esc(channelName(task))}</small></span><b>${task.priority === "high" ? "Urgente" : chosen.has(task.id) ? "Elegida" : "+"}</b></button>`).join("") : '<p class="priority-empty">Este proyecto no tiene tareas pendientes.</p>';
   $("taskResults").querySelectorAll("[data-id]").forEach(button => button.addEventListener("click", () => chooseTask(button.dataset.id)));
 }
 
@@ -100,15 +119,15 @@ function savePlan(close = true) {
 }
 
 function fillFilters() {
-  const ids = [...new Set(["personal", "work", ...channels().filter(channel => !channel.hiddenFromVideos && channel.id !== "routine").map(channel => channel.id), ...tasks().map(channelId)])];
-  $("channelFilter").innerHTML = '<option value="all">Todos los canales</option>' + ids.map(id => `<option value="${esc(id)}">${esc(channels().find(c=>c.id===id)?.name || id)}</option>`).join("");
+  const ids = [...new Set(["routine", "personal", "work", ...channels().filter(channel => !channel.hiddenFromVideos && channel.id !== "routine").map(channel => channel.id), ...tasks().map(channelId)])];
+  $("channelFilter").innerHTML = '<option value="all">Todos los canales</option>' + ids.map(id => `<option value="${esc(id)}">${esc(id === "routine" ? "Personal" : channels().find(c=>c.id===id)?.name || id)}</option>`).join("");
   $("newChannel").innerHTML = ids.map(id => `<option value="${esc(id)}">${esc(channels().find(c=>c.id===id)?.name || id)}</option>`).join("");
   fillProjects();
 }
 function fillProjects() { const channel = $("newChannel").value; $("newProject").innerHTML = '<option value="">Sin proyecto</option>' + projects().filter(p => !p.archived && (p.workChannelId || p.mode || "personal") === channel).map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join(""); }
 function createTask(event) {
   event.preventDefault(); const text = $("newTaskName").value.trim(); if (!text) return;
-  const all = tasks(), task = { id:uid(), text, done:false, notes:"", priority:$("newPriority").value, deleted:false, category:$("newCategory").value, dueDate:$("newDue").value || null, mode:$("newChannel").value, projectId:$("newProject").value || null, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() };
+  const all = tasks(), task = { id:uid(), text, done:false, notes:"", priority:"medium", deleted:false, category:"inbox", dueDate:$("newDue").value || null, mode:$("newChannel").value, projectId:$("newProject").value || null, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() };
   all.push(task); write(TASKS_KEY, all); chooseTask(task.id); $("createForm").classList.add("hidden"); $("newTaskName").value="";
 }
 
@@ -118,7 +137,7 @@ $("historyDate").addEventListener("change", event => { if (!event.target.value) 
 if (targetDate !== dateKey()) $("priorityTitle").textContent = "Preparar las prioridades de mañana";
 $("closeBtn").addEventListener("click",()=>ipcRenderer.send("close-current-window"));
 $("saveBtn").addEventListener("click",()=>savePlan());
-$("searchInput").addEventListener("input",renderResults); $("channelFilter").addEventListener("change",renderResults);
+$("searchInput").addEventListener("input",renderResults); $("channelFilter").addEventListener("change",()=>{ selectedProjectId=null; renderResults(); });
 $("addExtraBtn").addEventListener("click",()=>{ const slot = Math.max(3,...plan.map(i=>i.slot))+1; plan.push({id:`extra-${targetDate}-${uid()}`,slot,kind:"additional",taskId:null}); selectedSlot=slot; renderPlan(); renderResults(); });
 $("createToggle").addEventListener("click",()=>$("createForm").classList.toggle("hidden")); $("newChannel").addEventListener("change",fillProjects); $("createForm").addEventListener("submit",createTask);
 loadPlan(); fillFilters(); renderPlan(); renderResults();

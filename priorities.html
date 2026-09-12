@@ -20,16 +20,15 @@
       </aside>
       <section class="priority-picker">
         <div class="priority-search-row"><input class="tool-input" id="searchInput" placeholder="Buscar cualquier tarea…" /><select class="tool-select" id="channelFilter"><option value="all">Todos los canales</option></select></div>
-        <div class="priority-hint">Primero aparecen vencidas, para hoy, urgentes y de proyectos activos. La fecha no convierte una tarea en prioridad.</div>
+        <div class="priority-hint">Elegí primero un proyecto o video. Después vas a ver únicamente sus tareas, con las subtareas debajo.</div>
+        <div class="priority-project-browser" id="priorityProjectBrowser"></div>
         <div class="priority-results" id="taskResults"></div>
         <button class="tool-btn priority-create-toggle" id="createToggle">+ Crear nueva tarea real</button>
         <form class="priority-create hidden" id="createForm">
           <input class="tool-input" id="newTaskName" maxlength="160" placeholder="Nombre de la tarea" />
           <select class="tool-select" id="newChannel"></select>
           <select class="tool-select" id="newProject"></select>
-          <select class="tool-select" id="newCategory"><option value="inbox">Inbox</option><option value="actionable">Accionable</option><option value="waiting">En espera</option></select>
           <input class="tool-input" id="newDue" type="date" />
-          <select class="tool-select" id="newPriority"><option value="medium">Prioridad normal</option><option value="high">Urgente</option><option value="low">Baja</option></select>
           <button class="tool-btn primary" type="submit">Crear y elegir</button>
         </form>
       </section>
