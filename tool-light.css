@@ -70,22 +70,22 @@ body.tool-window {
 .tool-window .session-chip.area-personal { border-left: 4px solid #2563eb; }
 .tool-window .session-chip.area-work { border-left: 4px solid #f59e0b; }
 .tool-window .session-chip {
-  padding: 5px 6px; line-height: 1.15;
+  padding: 7px 8px; line-height: 1.2;
 }
 .tool-window .session-chip-head,.tool-window .session-channel-row,.tool-window .side-panel-head {
   display: flex; align-items: center; justify-content: space-between; gap: 5px;
 }
-.tool-window .session-chip-head b { font-size: 10px; }
+.tool-window .session-chip-head b { font-size: 12px; }
 .tool-window .energy-tag { padding: 2px 4px; border-radius: 99px; color: inherit; background: rgba(255,255,255,.68); font-size: 8px; }
 .tool-window .session-channel-row { justify-content: flex-start; margin-top: 4px; min-width: 0; }
-.tool-window .session-channel-row strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-window .session-channel-row strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .tool-window .session-avatar {
   display: grid; place-items: center; flex: 0 0 16px; width: 16px; height: 16px; overflow: hidden;
   border-radius: 50%; color: #fff; background: #4f46e5; font-size: 8px; font-weight: 900;
 }
 .tool-window .session-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.tool-window .session-video { overflow: hidden; margin-top: 4px; font-size: 9px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
-.tool-window .session-label,.tool-window .session-chip small { display: block; overflow: hidden; margin-top: 3px; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.tool-window .session-video { overflow: hidden; margin-top: 5px; font-size: 10px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.tool-window .session-label,.tool-window .session-chip small { display: block; overflow: hidden; margin-top: 4px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .tool-window .session-chip.energy-low { color: #9b2c24; background: #ffebe8; border-color: #f5aaa2; }
 .tool-window .session-chip.energy-mid { color: #795b00; background: #fff6c7; border-color: #eadb72; }
 .tool-window .session-chip.energy-high { color: #17613b; background: #dff8e9; border-color: #78d7a0; }

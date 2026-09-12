@@ -50,11 +50,20 @@
     </section>
 
     <section class="personal-projects hidden" id="projectsView">
-      <div class="personal-projects-toolbar">
-        <div><div class="habit-section-title">Mini proyectos</div><div class="habit-subtitle">Los mismos que usás entre sesiones</div></div>
-        <button class="tool-btn primary" id="addMiniProjectBtn" type="button">+ Nuevo proyecto</button>
-      </div>
-      <div class="personal-project-grid" id="personalProjectGrid"></div>
+      <section class="personal-project-section" id="sessionProjectsSection">
+        <div class="personal-projects-toolbar">
+          <div class="habit-section-title">Proyectos</div>
+          <div class="personal-project-actions"><button class="tool-btn" id="toggleArchivedProjects" type="button">Archivados</button><button class="tool-btn primary" id="addSessionProjectBtn" type="button">+ Nuevo proyecto</button></div>
+        </div>
+        <div class="personal-project-grid" id="sessionProjectGrid"></div>
+      </section>
+      <section class="personal-project-section" id="miniProjectsSection">
+        <div class="personal-projects-toolbar">
+          <div class="habit-section-title">Mini proyectos</div>
+          <button class="tool-btn primary" id="addMiniProjectBtn" type="button">+</button>
+        </div>
+        <div class="personal-project-grid" id="personalProjectGrid"></div>
+      </section>
       <section class="personal-project-detail hidden" id="personalProjectDetail">
         <button class="personal-project-back" id="backToMiniProjects" type="button">← Todos los proyectos</button>
         <div class="personal-project-hero" id="personalProjectHero"></div>
@@ -100,6 +109,23 @@
       <div class="note-actions">
         <button class="tool-btn primary" type="submit">Guardar</button>
         <button class="tool-btn" id="cancelHabitFormBtn" type="button">Cancelar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="habit-dialog" id="sessionProjectDialog">
+    <form class="habit-form" id="sessionProjectForm">
+      <div class="review-title" id="sessionProjectFormTitle">Nuevo proyecto</div>
+      <input class="tool-input" id="sessionProjectName" maxlength="100" placeholder="Nombre del proyecto" required />
+      <label class="review-label">Fecha de inicio</label>
+      <input class="tool-input" id="sessionProjectStartDate" type="date" />
+      <label class="review-label">Fecha límite (opcional)</label>
+      <input class="tool-input" id="sessionProjectDueDate" type="date" />
+      <label class="review-label">Tiempo estimado (horas)</label>
+      <input class="tool-input" id="sessionProjectHours" type="number" min="0" max="10000" step="0.5" placeholder="Ej. 40" />
+      <div class="note-actions">
+        <button class="tool-btn primary" type="submit">Guardar proyecto</button>
+        <button class="tool-btn" id="cancelSessionProjectBtn" type="button">Cancelar</button>
       </div>
     </form>
   </dialog>

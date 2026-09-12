@@ -1,5 +1,5 @@
 const { ipcRenderer } = require("electron");
-const TASKS_KEY = "justtimer.dayTasks.v1", PROJECTS_KEY = "justtimer.projects.v1", MINI_PROJECTS_KEY = "justtimer.miniProjects.v1", CHANNELS_KEY = "justtimer.workChannels.v1", PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
+const TASKS_KEY = "justtimer.dayTasks.v1", PROJECTS_KEY = "justtimer.projects.v1", MINI_PROJECTS_KEY = "justtimer.miniProjects.v1", PERSONAL_PROJECTS_KEY = "justtimer.personalProjects.v1", CHANNELS_KEY = "justtimer.workChannels.v1", PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
 const $ = id => document.getElementById(id);
 const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch { return fallback; } };
 const write = (key, value) => { localStorage.setItem(key, JSON.stringify(value)); ipcRenderer.send("data-changed"); };
@@ -13,7 +13,8 @@ function uid() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; 
 function tasks() { const value = read(TASKS_KEY, []); return Array.isArray(value) ? value : []; }
 function videoProjects() { const value = read(PROJECTS_KEY, []); return Array.isArray(value) ? value : []; }
 function miniProjects() { const value = read(MINI_PROJECTS_KEY, []); return Array.isArray(value) ? value : []; }
-function projects() { return [...videoProjects(), ...miniProjects().map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))]; }
+function personalProjects() { const value=read(PERSONAL_PROJECTS_KEY,[]); return Array.isArray(value)?value:[]; }
+function projects() { return [...videoProjects(), ...personalProjects().map(project=>({...project,title:project.name,workChannelId:"routine",type:"personal-project"})), ...miniProjects().map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))]; }
 function channels() { return read(CHANNELS_KEY, []); }
 function projectFor(task) { return projects().find(project => project.id === task.projectId); }
 function channelId(task) { const project = projectFor(task); return project?.workChannelId || project?.mode || task.mode || "personal"; }
@@ -88,7 +89,7 @@ function renderResults() {
     const projectRows = projects().filter(project => !project.archived && (filter === "all" || (project.workChannelId || project.mode || "personal") === filter)).map(project => ({ project, count:availableTasks.filter(task => task.projectId === project.id).length }));
     const unassignedChannels = [...new Set(availableTasks.filter(task => !task.projectId).map(channelId))].map(id => ({ project:{ id:`__unassigned__:${id}`, title:id === "routine" ? "Personal sin proyecto" : "Tareas generales", workChannelId:id, type:"unassigned" }, count:availableTasks.filter(task => !task.projectId && channelId(task) === id).length }));
     const rows = [...projectRows, ...unassignedChannels].filter(row => !q || row.project.title.toLowerCase().includes(q));
-    browser.innerHTML = rows.length ? rows.map(({ project, count }) => `<button class="priority-project-choice" data-project="${esc(project.id)}"><span>${project.type === "mini-project" ? esc(project.icon || "🌱") : project.type === "unassigned" ? "•" : "▶"}</span><span><strong>${esc(project.title)}</strong><small>${esc(channels().find(c=>c.id===(project.workChannelId||project.mode))?.name || (project.workChannelId === "routine" ? "Personal" : "Canal"))} · ${count} tareas pendientes</small></span><b>→</b></button>`).join("") : '<p class="priority-empty">No hay proyectos en este filtro.</p>';
+    browser.innerHTML = rows.length ? rows.map(({ project, count }) => `<button class="priority-project-choice" data-project="${esc(project.id)}"><span>${project.type === "mini-project" ? esc(project.icon || "🌱") : project.type === "personal-project" ? "◆" : project.type === "unassigned" ? "•" : "▶"}</span><span><strong>${esc(project.title)}</strong><small>${esc(channels().find(c=>c.id===(project.workChannelId||project.mode))?.name || (project.workChannelId === "routine" ? "Personal" : "Canal"))} · ${count} tareas pendientes</small></span><b>→</b></button>`).join("") : '<p class="priority-empty">No hay proyectos en este filtro.</p>';
     browser.querySelectorAll("[data-project]").forEach(button => button.addEventListener("click", () => { selectedProjectId = button.dataset.project; $("searchInput").value = ""; renderResults(); }));
     return;
   }

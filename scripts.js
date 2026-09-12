@@ -5,6 +5,7 @@ const TASKS_KEY = "justtimer.tasks.v1";
 const ACTIVE_SESSION_KEY = "justtimer.activeSession.v1";
 const SESSION_TYPES_KEY = "justtimer.sessionTypes.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
+const PERSONAL_PROJECTS_KEY = "justtimer.personalProjects.v1";
 const WORK_CHANNELS_KEY = "justtimer.workChannels.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const DAILY_PRIORITIES_KEY = "justtimer.dailyPriorities.v1";
@@ -44,6 +45,7 @@ let activeTaskStartedAt = null;
 let lastTaskCheckpointAt = 0;
 let lastSessionPersistAt = 0;
 let pendingSessionsSignature = "";
+let quarterSlotsVersion = null;
 const soundCache = new Map();
 const openInlineSubtaskIds = new Set();
 const inlineSubtaskDrafts = new Map();
@@ -519,6 +521,16 @@ function readProjects() {
   }
 }
 
+function readPersonalProjects() {
+  try { const parsed=JSON.parse(localStorage.getItem(PERSONAL_PROJECTS_KEY)||"[]"); return Array.isArray(parsed)?parsed:[]; } catch { return []; }
+}
+
+function assignableProjects(area = null) {
+  const videos=readProjects(), personal=readPersonalProjects().map(project=>({...project,title:project.name,workChannelId:"routine",type:"personal-project"}));
+  const all=area==="routine"?[...videos,...personal]:videos;
+  return all.filter(project=>!project.archived && (!area || projectWorkChannel(project)===area));
+}
+
 function readWorkChannels() {
   let channels = [];
   try { const parsed = JSON.parse(localStorage.getItem(WORK_CHANNELS_KEY) || "[]"); channels = Array.isArray(parsed) ? parsed : []; } catch {}
@@ -539,10 +551,10 @@ function fillWorkAreaSelect(select, selectedArea) {
 
 function fillVideoSelect(select, area, selectedId = "") {
   if (!select) return;
-  const projects = readProjects().filter(project => !project.archived);
+  const projects = assignableProjects(area);
   const current = selectedId || select.value;
   select.innerHTML = `<option value="">Trabajo general de ${workAreaLabel(area)}</option>`;
-  projects.filter(project => projectWorkChannel(project) === area).forEach(project => {
+  projects.forEach(project => {
       const option = document.createElement("option");
       option.value = project.id;
       option.textContent = project.title;
@@ -552,7 +564,7 @@ function fillVideoSelect(select, area, selectedId = "") {
 }
 
 function renderProjectSelects(selectedId = "", selectedArea = null) {
-  const project = readProjects().find(item => item.id === selectedId);
+  const project = [...readProjects(),...readPersonalProjects().map(item=>({...item,title:item.name,workChannelId:"routine"}))].find(item => item.id === selectedId);
   const area = selectedArea || (project ? projectWorkChannel(project) : null) || localStorage.getItem("justtimer.workArea.v1") || "personal";
   [$("sessionWorkArea"), $("reviewWorkArea")].filter(Boolean).forEach(select => fillWorkAreaSelect(select, area));
   fillVideoSelect($("sessionProjectSelect"), area, selectedId);
@@ -745,6 +757,7 @@ function buildQuarterButtons() {
   const grid = $("quarterGrid");
   grid.innerHTML = "";
   const now = new Date();
+  quarterSlotsVersion = Math.floor(now.getTime() / (15 * 60 * 1000));
 
   nextQuarters(4).forEach(time => {
     const btn = document.createElement("button");
@@ -1201,7 +1214,7 @@ function finishSession({ skip = false } = {}) {
       workArea,
       workAreaName: workAreaLabel(workArea),
       projectId: selectedProjectId,
-      projectName: readProjects().find(project => project.id === selectedProjectId)?.title || null,
+      projectName: assignableProjects(workArea).find(project => project.id === selectedProjectId)?.title || null,
       notes: skip ? "" : $("reviewNotes").value.trim(),
       energy: skip ? null : reviewEnergy,
       tasks: reviewedTasks,
@@ -1488,7 +1501,7 @@ window.addEventListener("storage", event => {
     if (!$("inlineTasksPanel").classList.contains("hidden")) renderInlineTasks();
     renderCurrentTask();
   }
-  if ([PROJECTS_KEY, WORK_CHANNELS_KEY].includes(event.key)) renderProjectSelects();
+  if ([PROJECTS_KEY, PERSONAL_PROJECTS_KEY, WORK_CHANNELS_KEY].includes(event.key)) renderProjectSelects();
 });
 
 updateSkyGradient();
@@ -1497,6 +1510,8 @@ setInterval(() => {
   const pending = getPendingSessions();
   updateSessionSummary(pending);
   autoStartPendingSessions(pending);
+  const currentQuarterVersion = Math.floor(Date.now() / (15 * 60 * 1000));
+  if (currentQuarterVersion !== quarterSlotsVersion && !$("panelSetup").classList.contains("hidden")) { selectedQuarter = null; buildQuarterButtons(); }
 }, 1000);
 
 buildQuarterButtons();

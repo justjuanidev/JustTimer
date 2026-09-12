@@ -4,6 +4,8 @@ const HABITS_KEY = "justtimer.habits.v1";
 const HABIT_LOGS_KEY = "justtimer.habitLogs.v1";
 const MINI_PROJECTS_KEY = "justtimer.miniProjects.v1";
 const MINI_PROJECT_LOGS_KEY = "justtimer.miniProjectSessions.v1";
+const PERSONAL_PROJECTS_KEY = "justtimer.personalProjects.v1";
+const SESSIONS_KEY = "justtimer.sessions.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const DAY_NAMES = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 const PHASES = {
@@ -22,6 +24,9 @@ let pendingLog = null;
 let editingHabitId = null;
 let personalMode = "habits";
 let selectedMiniProjectId = null;
+let selectedSessionProjectId = null;
+let editingSessionProjectId = null;
+let showArchivedProjects = false;
 
 function $(id) {
   return document.getElementById(id);
@@ -130,7 +135,7 @@ function render() {
   const dailyHabits = habits.filter(habit => habit.kind === "daily");
   const dailyPending = dailyHabits.filter(habit => !habitDone(habit, logs));
 
-  $("todayLabel").textContent = `${DAY_NAMES[now.getDay()]} ${dateKey(now)}`;
+  $("todayLabel").textContent = `${DAY_NAMES[now.getDay()]} ${String(now.getDate()).padStart(2,"0")}/${String(now.getMonth()+1).padStart(2,"0")}`;
   $("phaseGreeting").textContent = phase.greeting;
   $("phaseRange").textContent = `${phase.label} · ${phase.range}`;
   $("phaseHero").className = `phase-hero ${currentPhase}`;
@@ -488,6 +493,16 @@ function miniProjectLogs() {
   return Array.isArray(value) ? value : [];
 }
 
+function sessionProjects() {
+  const value = readJson(PERSONAL_PROJECTS_KEY, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function sessionRecords() {
+  const value = readJson(SESSIONS_KEY, []);
+  return Array.isArray(value) ? value : [];
+}
+
 function personalTasks() {
   const value = readJson(DAY_TASKS_KEY, []);
   return Array.isArray(value) ? value : [];
@@ -499,6 +514,13 @@ function miniProjectStats(projectId) {
   const rows = miniProjectLogs().filter(row => row.projectId === projectId);
   const tasks = personalTasks().filter(task => !task.deleted && task.projectId === projectId);
   const seconds = rows.reduce((sum, row) => sum + (Number(row.durationSecs) || 0), 0);
+  return { sessions:rows.length, seconds, tasks:tasks.length, pending:tasks.filter(task => !task.done).length };
+}
+
+function sessionProjectStats(projectId) {
+  const rows = sessionRecords().filter(session => session.status === "done" && session.projectId === projectId);
+  const tasks = personalTasks().filter(task => !task.deleted && task.projectId === projectId);
+  const seconds = rows.reduce((sum, session) => sum + Math.max(0, Number(session.durationSecs) || 0) - Math.max(0, Number(session.breakTotalSecs) || 0), 0);
   return { sessions:rows.length, seconds, tasks:tasks.length, pending:tasks.filter(task => !task.done).length };
 }
 
@@ -519,29 +541,43 @@ function setPersonalMode(nextMode) {
   if (!isHabits) renderMiniProjects();
 }
 
+function displayDate(value) {
+  if (!value) return "Sin fecha";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}` : value;
+}
+
+function projectCard(project, type) {
+  const stats = type === "mini" ? miniProjectStats(project.id) : sessionProjectStats(project.id), card = document.createElement("button");
+  const plannedSecs = Math.max(0, Number(project.estimatedHours) || 0) * 3600;
+  card.type = "button"; card.className = `personal-project-card ${project.archived ? "archived" : ""}`;
+  card.innerHTML = `<span class="personal-project-icon">${type === "mini" ? escapeHtml(project.icon || "🌱") : "◆"}</span><span class="personal-project-copy"><strong>${escapeHtml(project.name)}</strong><small>${stats.pending} pendientes · ${stats.tasks} tareas · ${stats.sessions} sesiones${type === "session" && project.dueDate ? ` · ${displayDate(project.dueDate)}` : ""}</small></span><span class="personal-project-time">${shortDuration(stats.seconds)}${plannedSecs ? ` / ${shortDuration(plannedSecs)}` : ""}</span>`;
+  card.addEventListener("click", () => { selectedMiniProjectId = type === "mini" ? project.id : null; selectedSessionProjectId = type === "session" ? project.id : null; renderMiniProjects(); });
+  return card;
+}
+
 function renderMiniProjects() {
   const grid = $("personalProjectGrid");
+  const sessionGrid = $("sessionProjectGrid");
   const detail = $("personalProjectDetail");
-  if (selectedMiniProjectId) {
-    const project = miniProjects().find(item => item.id === selectedMiniProjectId && !item.archived);
+  if (selectedMiniProjectId || selectedSessionProjectId) {
+    const type = selectedSessionProjectId ? "session" : "mini";
+    const project = type === "session" ? sessionProjects().find(item => item.id === selectedSessionProjectId) : miniProjects().find(item => item.id === selectedMiniProjectId && !item.archived);
     if (project) {
-      grid.classList.add("hidden");
+      $("sessionProjectsSection").classList.add("hidden"); $("miniProjectsSection").classList.add("hidden");
       detail.classList.remove("hidden");
-      renderMiniProjectDetail(project);
+      renderPersonalProjectDetail(project, type);
       return;
     }
-    selectedMiniProjectId = null;
+    selectedMiniProjectId = null; selectedSessionProjectId = null;
   }
-  detail.classList.add("hidden"); grid.classList.remove("hidden"); grid.innerHTML = "";
+  detail.classList.add("hidden"); $("sessionProjectsSection").classList.remove("hidden"); $("miniProjectsSection").classList.remove("hidden"); grid.innerHTML = ""; sessionGrid.innerHTML = "";
+  const regular = sessionProjects().filter(project => Boolean(project.archived) === showArchivedProjects);
+  regular.forEach(project => sessionGrid.appendChild(projectCard(project, "session")));
+  if (!regular.length) sessionGrid.innerHTML = `<div class="habit-empty">${showArchivedProjects ? "No hay proyectos archivados." : "Todavía no hay proyectos."}</div>`;
   const active = miniProjects().filter(project => !project.archived);
-  active.forEach(project => {
-    const stats = miniProjectStats(project.id), card = document.createElement("button");
-    card.type = "button"; card.className = "personal-project-card";
-    card.innerHTML = `<span class="personal-project-icon">${escapeHtml(project.icon || "🌱")}</span><span class="personal-project-copy"><strong>${escapeHtml(project.name)}</strong><small>${stats.pending} pendientes · ${stats.tasks} tareas · ${stats.sessions} sesiones</small></span><span class="personal-project-time">${shortDuration(stats.seconds)}</span>`;
-    card.addEventListener("click", () => { selectedMiniProjectId = project.id; renderMiniProjects(); });
-    grid.appendChild(card);
-  });
-  if (!active.length) grid.innerHTML = '<div class="habit-empty">Creá tu primer proyecto personal. También aparecerá en los breaks entre sesiones.</div>';
+  active.forEach(project => grid.appendChild(projectCard(project, "mini")));
+  if (!active.length) grid.innerHTML = '<div class="habit-empty">Todavía no hay mini proyectos.</div>';
 }
 
 function orderedProjectTasks(projectId) {
@@ -553,28 +589,48 @@ function orderedProjectTasks(projectId) {
 
 function writePersonalTasks(value) { writeJson(DAY_TASKS_KEY, value); }
 
-function renderMiniProjectDetail(project) {
-  const stats = miniProjectStats(project.id);
-  $("personalProjectHero").innerHTML = `<div><span class="personal-project-icon large">${escapeHtml(project.icon || "🌱")}</span><div><h2>${escapeHtml(project.name)}</h2><p>${stats.sessions} sesiones · ${shortDuration(stats.seconds)} trabajados · ${stats.pending} pendientes</p></div></div><div class="personal-project-dates"><span>Inicio <b>${escapeHtml(project.startDate || "Sin fecha")}</b></span><span>Límite <b>${escapeHtml(project.dueDate || "Sin fecha")}</b></span></div>`;
+function renderPersonalProjectDetail(project, type) {
+  const stats = type === "mini" ? miniProjectStats(project.id) : sessionProjectStats(project.id), plannedSecs = Math.max(0, Number(project.estimatedHours) || 0) * 3600, percent = plannedSecs ? Math.min(100, Math.round(stats.seconds / plannedSecs * 100)) : 0;
+  $("personalProjectHero").innerHTML = `<div><span class="personal-project-icon large">${type === "mini" ? escapeHtml(project.icon || "🌱") : "◆"}</span><div><h2>${escapeHtml(project.name)}</h2><p>${stats.sessions} sesiones · ${shortDuration(stats.seconds)} trabajados · ${stats.pending} pendientes</p>${type === "session" && plannedSecs ? `<div class="personal-time-progress"><i style="width:${percent}%"></i></div><small>${percent}% de ${shortDuration(plannedSecs)}</small>` : ""}</div></div><div class="personal-project-dates"><span>Inicio <b>${displayDate(project.startDate)}</b></span><span>Límite <b>${displayDate(project.dueDate)}</b></span>${type === "session" ? '<button class="tool-btn" id="editPersonalProject" type="button">Editar</button><button class="tool-btn danger" id="archivePersonalProject" type="button">'+(project.archived ? "Restaurar" : "Archivar")+'</button>' : ""}</div>`;
+  if (type === "session") {
+    $("editPersonalProject").addEventListener("click", () => openSessionProjectForm(project));
+    $("archivePersonalProject").addEventListener("click", () => { writeJson(PERSONAL_PROJECTS_KEY, sessionProjects().map(item => item.id === project.id ? { ...item, archived:!item.archived, updatedAt:new Date().toISOString() } : item)); selectedSessionProjectId = null; renderMiniProjects(); });
+  }
   const list = $("personalTaskList"), rows = orderedProjectTasks(project.id); list.innerHTML = "";
   rows.forEach(task => {
     const isSubtask = Boolean(task.parentTaskId), row = document.createElement("article");
     row.className = `personal-task-row ${isSubtask ? "personal-subtask" : ""} ${task.done ? "done" : ""}`;
     row.innerHTML = `<button class="personal-task-check" type="button">${task.done ? "✓" : ""}</button><button class="personal-task-copy" type="button"><strong>${isSubtask ? "↳ " : ""}${escapeHtml(task.text)}</strong><small>${isSubtask ? "Subtarea" : "Tarea"}${task.dueDate ? ` · vence ${escapeHtml(task.dueDate)}` : ""}</small></button>${isSubtask ? "" : '<button class="personal-add-subtask" type="button" title="Agregar subtarea">+</button>'}<button class="personal-task-delete" type="button" title="Eliminar">×</button>`;
-    row.querySelector(".personal-task-check").addEventListener("click", () => { const at = new Date().toISOString(); writePersonalTasks(personalTasks().map(item => item.id === task.id ? { ...item, done:!task.done, completedAt:!task.done ? at : null } : item)); renderMiniProjectDetail(project); });
-    row.querySelector(".personal-task-copy").addEventListener("click", () => { const text = window.prompt("Editar tarea", task.text); if (text?.trim()) { writePersonalTasks(personalTasks().map(item => item.id === task.id ? { ...item, text:text.trim(), updatedAt:new Date().toISOString() } : item)); renderMiniProjectDetail(project); } });
-    row.querySelector(".personal-add-subtask")?.addEventListener("click", () => addPersonalSubtask(project, task));
-    row.querySelector(".personal-task-delete").addEventListener("click", () => { const ids = new Set([task.id]); personalTasks().filter(item => item.parentTaskId === task.id).forEach(item => ids.add(item.id)); writePersonalTasks(personalTasks().map(item => ids.has(item.id) ? { ...item, deleted:true, deletedAt:new Date().toISOString() } : item)); renderMiniProjectDetail(project); });
+    row.querySelector(".personal-task-check").addEventListener("click", () => { const at = new Date().toISOString(); writePersonalTasks(personalTasks().map(item => item.id === task.id ? { ...item, done:!task.done, completedAt:!task.done ? at : null } : item)); renderPersonalProjectDetail(project, type); });
+    row.querySelector(".personal-task-copy").addEventListener("click", () => { const text = window.prompt("Editar tarea", task.text); if (text?.trim()) { writePersonalTasks(personalTasks().map(item => item.id === task.id ? { ...item, text:text.trim(), updatedAt:new Date().toISOString() } : item)); renderPersonalProjectDetail(project, type); } });
+    row.querySelector(".personal-add-subtask")?.addEventListener("click", () => addPersonalSubtask(project, task, type));
+    row.querySelector(".personal-task-delete").addEventListener("click", () => { const ids = new Set([task.id]); personalTasks().filter(item => item.parentTaskId === task.id).forEach(item => ids.add(item.id)); writePersonalTasks(personalTasks().map(item => ids.has(item.id) ? { ...item, deleted:true, deletedAt:new Date().toISOString() } : item)); renderPersonalProjectDetail(project, type); });
     list.appendChild(row);
   });
   if (!rows.length) list.innerHTML = '<div class="habit-empty">Todavía no hay tareas en este proyecto.</div>';
 }
 
-function addPersonalSubtask(project, parent) {
+function addPersonalSubtask(project, parent, type) {
   const text = window.prompt("Nueva subtarea"); if (!text?.trim()) return;
   const now = new Date().toISOString();
-  writePersonalTasks([...personalTasks(), { id:freshId(), parentTaskId:parent.id, text:text.trim(), done:false, deleted:false, priority:parent.priority || "medium", category:"inbox", dueDate:parent.dueDate || null, mode:"routine", projectId:project.id, focusedSecs:0, sessionIds:[], createdAt:now }]);
-  renderMiniProjectDetail(project);
+  writePersonalTasks([...personalTasks(), { id:freshId(), parentTaskId:parent.id, text:text.trim(), done:false, deleted:false, priority:parent.priority || "medium", category:"inbox", dueDate:parent.dueDate || null, mode:"routine", projectId:project.id, personalProjectType:type, focusedSecs:0, sessionIds:[], createdAt:now }]);
+  renderPersonalProjectDetail(project, type);
+}
+
+function openSessionProjectForm(project = null) {
+  editingSessionProjectId = project?.id || null;
+  $("sessionProjectFormTitle").textContent = project ? "Editar proyecto" : "Nuevo proyecto";
+  $("sessionProjectName").value = project?.name || ""; $("sessionProjectStartDate").value = project?.startDate || ""; $("sessionProjectDueDate").value = project?.dueDate || ""; $("sessionProjectHours").value = project?.estimatedHours || "";
+  $("sessionProjectDialog").showModal();
+}
+
+function saveSessionProject(event) {
+  event.preventDefault(); const name=$("sessionProjectName").value.trim(),startDate=$("sessionProjectStartDate").value||null,dueDate=$("sessionProjectDueDate").value||null,estimatedHours=Math.max(0,Number($("sessionProjectHours").value)||0);
+  if (!name) return; if (startDate && dueDate && startDate > dueDate) { alert("La fecha de inicio no puede ser posterior a la fecha límite."); return; }
+  const now=new Date().toISOString(), all=sessionProjects();
+  if (editingSessionProjectId) writeJson(PERSONAL_PROJECTS_KEY, all.map(item=>item.id===editingSessionProjectId?{...item,name,startDate,dueDate,estimatedHours,updatedAt:now}:item));
+  else writeJson(PERSONAL_PROJECTS_KEY,[...all,{id:freshId(),name,startDate,dueDate,estimatedHours,archived:false,createdAt:now}]);
+  editingSessionProjectId=null; $("sessionProjectDialog").close(); renderMiniProjects();
 }
 
 function saveMiniProject(event) {
@@ -589,14 +645,18 @@ function saveMiniProject(event) {
 $("addHabitBtn").addEventListener("click", () => openHabitForm());
 $("habitsModeBtn").addEventListener("click", () => setPersonalMode("habits"));
 $("projectsModeBtn").addEventListener("click", () => setPersonalMode("projects"));
+$("addSessionProjectBtn").addEventListener("click", () => openSessionProjectForm());
+$("toggleArchivedProjects").addEventListener("click", () => { showArchivedProjects = !showArchivedProjects; $("toggleArchivedProjects").classList.toggle("active", showArchivedProjects); renderMiniProjects(); });
+$("sessionProjectForm").addEventListener("submit", saveSessionProject);
+$("cancelSessionProjectBtn").addEventListener("click", () => { editingSessionProjectId = null; $("sessionProjectDialog").close(); });
 $("addMiniProjectBtn").addEventListener("click", () => $("miniProjectDialog").showModal());
 $("cancelMiniProjectBtn").addEventListener("click", () => $("miniProjectDialog").close());
 $("miniProjectForm").addEventListener("submit", saveMiniProject);
-$("backToMiniProjects").addEventListener("click", () => { selectedMiniProjectId = null; renderMiniProjects(); });
+$("backToMiniProjects").addEventListener("click", () => { selectedMiniProjectId = null; selectedSessionProjectId = null; renderMiniProjects(); });
 $("personalTaskForm").addEventListener("submit", event => {
-  event.preventDefault(); const project = miniProjects().find(item => item.id === selectedMiniProjectId), text = $("personalTaskName").value.trim(); if (!project || !text) return;
-  writePersonalTasks([...personalTasks(), { id:freshId(), text, done:false, deleted:false, priority:"medium", category:"inbox", dueDate:$("personalTaskDue").value || null, mode:"routine", projectId:project.id, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() }]);
-  $("personalTaskName").value = ""; $("personalTaskDue").value = ""; renderMiniProjectDetail(project);
+  event.preventDefault(); const type=selectedSessionProjectId?"session":"mini",project=type==="session"?sessionProjects().find(item=>item.id===selectedSessionProjectId):miniProjects().find(item => item.id === selectedMiniProjectId), text = $("personalTaskName").value.trim(); if (!project || !text) return;
+  writePersonalTasks([...personalTasks(), { id:freshId(), text, done:false, deleted:false, priority:"medium", category:"inbox", dueDate:$("personalTaskDue").value || null, mode:"routine", projectId:project.id, personalProjectType:type, focusedSecs:0, sessionIds:[], createdAt:new Date().toISOString() }]);
+  $("personalTaskName").value = ""; $("personalTaskDue").value = ""; renderPersonalProjectDetail(project,type);
 });
 $("habitForm").addEventListener("submit", saveHabit);
 $("cancelHabitFormBtn").addEventListener("click", () => { editingHabitId = null; $("habitFormDialog").close(); });
@@ -617,7 +677,7 @@ $("habitPhaseSelect").addEventListener("change", renderReminderPresets);
 $("habitReminderTimes").addEventListener("input", renderReminderPresets);
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 window.addEventListener("storage", event => {
-  if (personalMode === "projects" && [MINI_PROJECTS_KEY, MINI_PROJECT_LOGS_KEY, DAY_TASKS_KEY].includes(event.key)) renderMiniProjects();
+  if (personalMode === "projects" && [MINI_PROJECTS_KEY, MINI_PROJECT_LOGS_KEY, PERSONAL_PROJECTS_KEY, SESSIONS_KEY, DAY_TASKS_KEY].includes(event.key)) renderMiniProjects();
 });
 
 render();

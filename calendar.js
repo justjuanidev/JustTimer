@@ -4,6 +4,7 @@ const SESSIONS_KEY = "justtimer.sessions.v1";
 const DAY_TASKS_KEY = "justtimer.dayTasks.v1";
 const PROJECTS_KEY = "justtimer.projects.v1";
 const MINI_PROJECTS_KEY = "justtimer.miniProjects.v1";
+const PERSONAL_PROJECTS_KEY = "justtimer.personalProjects.v1";
 const WORK_CHANNELS_KEY = "justtimer.workChannels.v1";
 const PROJECT_CHANNELS_KEY = "justtimer.projectChannels.v1";
 const DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
@@ -225,6 +226,19 @@ function readProjects() {
   return readJsonArray(PROJECTS_KEY);
 }
 
+function readPersonalProjects() {
+  return readJsonArray(PERSONAL_PROJECTS_KEY).map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"personal-project" }));
+}
+
+function assignableProjects(area = null) {
+  const projects = area === "routine" ? [...readProjects(), ...readPersonalProjects()] : readProjects();
+  return projects.filter(project => !project.archived && (!area || projectWorkChannel(project) === area));
+}
+
+function findAssignableProject(id) {
+  return [...readProjects(), ...readPersonalProjects()].find(project => project.id === id);
+}
+
 function readTaskProjects() {
   return [...readProjects(), ...readJsonArray(MINI_PROJECTS_KEY).map(project => ({ ...project, title:project.name, workChannelId:"routine", type:"mini-project" }))];
 }
@@ -248,7 +262,7 @@ function fillWorkAreaSelect(select, selected = "personal") {
 }
 function fillVideoSelect(select, area, selectedId = "") {
   if (!select) return;
-  const videos = readProjects().filter(project => !project.archived && projectWorkChannel(project) === area);
+  const videos = assignableProjects(area);
   select.innerHTML = `<option value="">Trabajo general de ${workAreaLabel(area)}</option>${videos.map(project => `<option value="${escapeAttr(project.id)}">${escapeHtml(project.title)}</option>`).join("")}`;
   select.value = videos.some(project => project.id === selectedId) ? selectedId : "";
 }
@@ -380,11 +394,12 @@ function renderCalendar() {
     if (project.startDate && visibleKeys.has(project.startDate)) milestoneByDay.get(project.startDate).push({ project, kind:"start" });
     if (project.dueDate && visibleKeys.has(project.dueDate)) milestoneByDay.get(project.dueDate).push({ project, kind:"due" });
   });
-  const milestoneHeight = Math.max(32, Math.max(0, ...[...milestoneByDay.values()].map(items => items.length)) * 24 + 6);
+  const milestoneStack = Math.max(0, ...[...milestoneByDay.values()].map(items => items.length));
+  const milestoneHeight = milestoneStack ? milestoneStack * 24 + 6 : 0;
   const milestoneCell = day => (milestoneByDay.get(dateKey(day)) || []).map(({ project, kind }) => `<button class="project-milestone ${kind}" data-project-id="${escapeAttr(project.id)}" title="Abrir ${escapeAttr(project.title)}"><b>${kind === "start" ? "▶" : "◆"}</b><span>${kind === "start" ? "Inicio" : "Límite"} · ${escapeHtml(project.title)}</span></button>`).join("");
   const plan = planForWeek(weekStart), result = weeklyResult(weekStart, plan);
   const dailyBadge = day => { const count = result.byDay.get(dateKey(day)) || 0, target = Math.max(0, Number(plan?.dailySessions) || 0), index = Math.round((startOfWeek(day) - startOfWeek(weekStart)) / 86400000) + ((day.getDay() + 6) % 7), planned = plan?.plannedDays?.includes(index); return target ? `<small class="daily-rhythm ${count >= target ? "reached" : ""} ${planned ? "planned" : "extra"}">${count}/${target}${count >= target ? " ✓" : ""}</small>` : ""; };
-  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content" style="--day-count:${days.length}"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head"><span>${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</span>${dailyBadge(day)}</div>`).join("")}</div><div class="calendar-milestone-row" style="height:${milestoneHeight}px"><div class="milestone-label">Proyectos</div>${days.map(day => `<div class="milestone-day">${milestoneCell(day)}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
+  grid.innerHTML = `<div class="calendar-scroll"><div class="calendar-week-content" style="--day-count:${days.length}"><div class="calendar-head-row"><div></div>${days.map(day => `<div class="cal-day-head"><span>${DAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} ${day.getDate()}</span>${dailyBadge(day)}</div>`).join("")}</div><div class="calendar-milestone-row" style="height:${milestoneHeight}px"><div class="milestone-label"></div>${days.map(day => `<div class="milestone-day">${milestoneCell(day)}</div>`).join("")}</div><div class="calendar-canvas"><div class="calendar-time-axis">${Array.from({ length: 24 }, (_, hour) => `<span class="calendar-time-label" style="top:${hour * 4 * SLOT_HEIGHT}px">${hour}:00</span>`).join("")}</div>${days.map(day => `<div class="calendar-day-column" data-calendar-day="${dateKey(day)}"></div>`).join("")}</div></div></div>`;
   grid.querySelectorAll(".project-milestone").forEach(button => button.addEventListener("click", () => {
     localStorage.setItem(OPEN_PROJECT_KEY, button.dataset.projectId);
     ipcRenderer.send("open-day-tasks");
@@ -477,7 +492,7 @@ function openSessionDialog(session) {
   $("closeSessionDialog").addEventListener("click", () => dialog.close());
   $("savePopupAssignment").addEventListener("click", () => {
     const workArea = $("popupWorkArea").value, projectId = $("popupProject").value || null;
-    const project = readProjects().find(item => item.id === projectId);
+    const project = findAssignableProject(projectId);
     writeSessions(readSessions().map(item => item.id === session.id ? { ...item, workArea, workAreaName: workAreaLabel(workArea), projectId, projectName: project?.title || null } : item));
     ipcRenderer.send("session-created"); dialog.close(); renderCalendar(); renderChannelGoals();
   });
@@ -502,7 +517,7 @@ function openFutureSessionDialog(session) {
   $("closeFutureDialog").addEventListener("click", () => dialog.close());
   $("saveFutureAssignment").addEventListener("click", () => {
     const workArea = $("futureWorkArea").value, projectId = $("futureProject").value || null;
-    const project = readProjects().find(item => item.id === projectId);
+    const project = findAssignableProject(projectId);
     writeSessions(readSessions().map(item => item.id === session.id ? { ...item, workArea, workAreaName: workAreaLabel(workArea), projectId, projectName: project?.title || null } : item));
     ipcRenderer.send("session-created"); dialog.close(); renderCalendar();
   });
@@ -811,7 +826,7 @@ function saveSessionEdits(id) {
     const status = $("sideStatus").value;
     const workArea = $("sideWorkArea").value || "personal";
     const projectId = $("sideProject").value || null;
-    const project = readProjects().find(item => item.id === projectId);
+    const project = findAssignableProject(projectId);
     const fallbackEnd = new Date(start.getTime() + durationMinutes * 60_000).toISOString();
     return {
       ...session,
@@ -898,7 +913,7 @@ function saveSession() {
   const sessions = readSessions();
   const workArea = $("calendarWorkArea").value || "personal";
   const projectId = $("calendarVideo").value || null;
-  const project = readProjects().find(item => item.id === projectId);
+  const project = findAssignableProject(projectId);
   const isPastRecord = registerMode || selectedStart < new Date();
   const endedAt = new Date(selectedStart.getTime() + durationMinutes * 60_000);
   const createdSession = {
@@ -1123,7 +1138,7 @@ $("weeklyChannelTargets").addEventListener("input", event => { if (event.target.
 $("closeBtn").addEventListener("click", () => ipcRenderer.send("close-current-window"));
 function scheduleCalendarRender(){if(calendarRenderQueued)return;calendarRenderQueued=true;requestAnimationFrame(()=>{calendarRenderQueued=false;renderCalendar();});}
 window.addEventListener("focus", scheduleCalendarRender);
-window.addEventListener("storage", event => { if ([PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) scheduleCalendarRender(); });
+window.addEventListener("storage", event => { if ([PROJECTS_KEY, PERSONAL_PROJECTS_KEY, SESSIONS_KEY, WORK_CHANNELS_KEY, WEEKLY_PLANS_KEY, DAY_TASKS_KEY].includes(event.key)) scheduleCalendarRender(); });
 
 renderTaskPlanner();
 renderCalendar();
